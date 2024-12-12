@@ -1,6 +1,4 @@
-# Honeybadger
-
-a Personal Device Audit tool for ISO27001
+# Honeybadger - a Personal Device Audit tool for ISO27001
 
 Make your computer as tough as a honeybadger. And that is tough. Check this video...
 
@@ -12,5 +10,14 @@ Make your computer as tough as a honeybadger. And that is tough. Check this vide
 git clone https://github.com/wearetechnative/honeybadger
 ./RUNME.sh audit
 ```
+
+## Credits
+
+- [Video Embedding](https://githubvideo.com/)
+- [Lynis](https://cisofy.com/lynis/)
+- [Lynis Report Converter](https://github.com/d4t4king/lynis-report-converter)
+- [Lynis Report Converter Dockerfile](https://github.com/oceanlazy/docker-lynis-report-converter)
+
+---
 
 © Technative 2024
