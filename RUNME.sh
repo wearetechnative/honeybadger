@@ -73,6 +73,7 @@ audit(){
  checkdeps "sed"
  checkdeps "neofetch"
  checkdeps "tar"
+ deps_missing
 
  output=output-$(whoami)-$(date +"%d-%m-%Y")
  tarball=honeybadger-$(whoami)-$(date +"%d-%m-%Y").tar.bz2
