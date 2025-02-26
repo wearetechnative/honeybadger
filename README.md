@@ -8,7 +8,7 @@ Make your computer as tough as a honeybadger. And that is tough. Check this vide
 
 ```
 git clone https://github.com/wearetechnative/honeybadger
-cd honeybadger``
+cd honeybadger
 ./RUNME.sh audit
 ```
 
