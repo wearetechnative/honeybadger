@@ -92,7 +92,7 @@ audit(){
  docker stop lynis_converter
  docker rm lynis_converter
  sudo rm /tmp/lynis-report.dat
- fastfetch|sed 's/\x1B\[[0-9;]*m//g' > $output/fastfetch.txt
+ fastfetch | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' > $output/fastfetch.txt
  show_version > $output/honeybadger-info.txt
  checkBlockDevices > $output/blockdevices.txt
  tar cjvf $tarball $output
