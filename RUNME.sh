@@ -27,7 +27,10 @@ function checkdeps(){
   then
     MISSING_DEPS+=("$1")
     echo "<$1> could not be found"
-    echo "  install this program first"
+    echo "  Install this program first"
+    if [ -n "$2" ]; then
+      echo "  Check this site for more info: $2"
+    fi
   fi
 }
 
@@ -68,10 +71,10 @@ audit(){
  show_version
 
  #checkdeps "jq"
- checkdeps "lynis"
+ checkdeps "lynis" "https://github.com/CISOfy/lynis"
  checkdeps "docker"
  checkdeps "sed"
- checkdeps "neofetch"
+ checkdeps "fastfetch" "https://github.com/fastfetch-cli/fastfetch"
  checkdeps "tar"
  deps_missing
 
@@ -89,7 +92,7 @@ audit(){
  docker stop lynis_converter
  docker rm lynis_converter
  sudo rm /tmp/lynis-report.dat
- neofetch|sed 's/\x1B\[[0-9;]*m//g' > $output/neofetch.txt
+ fastfetch|sed 's/\x1B\[[0-9;]*m//g' > $output/fastfetch.txt
  show_version > $output/honeybadger-info.txt
  checkBlockDevices > $output/blockdevices.txt
  tar cjvf $tarball $output
