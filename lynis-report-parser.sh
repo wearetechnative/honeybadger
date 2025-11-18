@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Script to parse Lynis report JSON and extract key security information
 # Usage: ./lynis-report-parser.sh /path/to/lynis-report.json
