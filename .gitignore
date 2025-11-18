@@ -2,3 +2,4 @@ lynis-**.json
 output**
 honeybadger**bz2
 report
+.aider*
