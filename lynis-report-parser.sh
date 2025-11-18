@@ -114,6 +114,23 @@ echo
 echo "===== SYSTEM UPDATES ====="
 echo "Package Audit Tool: $(get_json_value "package_audit_tool_found" "Unknown (0=no, 1=yes)")"
 echo "Vulnerable Packages Found: $(get_json_value "vulnerable_packages_found" "Unknown (0=no, 1=yes)")"
+echo "Unattended Upgrades Available: $(get_json_value "unattended_upgrade_option_available" "Unknown (0=no, 1=yes)")"
+
+# Check for any update-related suggestions
+update_suggestions=$(jq -r '.suggestion[]? | select(.description | contains("update") or contains("upgrade") or contains("patch"))' "$REPORT_FILE" 2>/dev/null)
+if [ -n "$update_suggestions" ]; then
+    echo "Update-related suggestions found:"
+    echo "$update_suggestions" | jq -r '.description' 2>/dev/null | while read -r line; do
+        if [ -n "$line" ] && [ "$line" != "null" ]; then
+            echo "- $line"
+        fi
+    done
+else
+    echo "No update-related suggestions found"
+fi
+
+# Report scan date as reference point
+echo "Scan performed on: $(get_json_value "report_datetime_end" "Unknown")"
 echo
 
 echo "===== SYSTEM HARDENING ====="
