@@ -1,4 +1,5 @@
-lynis-**.json
+lynis-*.json
+!lynis-report.json
 output**
 honeybadger**bz2
 report
