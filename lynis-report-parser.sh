@@ -72,26 +72,39 @@ echo
 echo "===== FIREWALL STATUS ====="
 echo "Firewall Installed: $(get_json_value "firewall_installed" "Unknown (0=no, 1=yes)")"
 echo "Firewall Active:    $(get_json_value "firewall_active" "Unknown (0=no, 1=yes)")"
-echo "Firewall Software:  $(get_json_array "firewall_software[]" "None detected")"
+
+# Handle firewall software safely
+firewall_software=$(jq -r '.firewall_software[]?' "$REPORT_FILE" 2>/dev/null)
+echo -n "Firewall Software:  "
+if [ -z "$firewall_software" ] || [ "$firewall_software" = "null" ]; then
+    echo "None detected"
+else
+    echo "$firewall_software"
+fi
+
 echo "Empty Ruleset:      $(get_json_value "firewall_empty_ruleset" "Unknown (0=no, 1=yes)")"
 echo
 
 echo "===== ENCRYPTION ====="
 echo "Encryption Methods:"
-encryption_data=$(get_json_array "encryption[]" "None detected")
-if [ "$encryption_data" != "None detected" ]; then
-    echo "$encryption_data" | while read -r line; do
-        echo "- $line"
+if jq -e 'has("encryption")' "$REPORT_FILE" >/dev/null 2>&1 && \
+   jq -e '.encryption | length > 0' "$REPORT_FILE" >/dev/null 2>&1; then
+    jq -r '.encryption[]?' "$REPORT_FILE" 2>/dev/null | while read -r line; do
+        if [ -n "$line" ] && [ "$line" != "null" ]; then
+            echo "- $line"
+        fi
     done
 else
     echo "- None detected"
 fi
 
 echo "Encrypted Swap:"
-encrypted_swap=$(get_json_array "encrypted_swap[]" "None detected")
-if [ "$encrypted_swap" != "None detected" ]; then
-    echo "$encrypted_swap" | while read -r line; do
-        echo "- $line"
+if jq -e 'has("encrypted_swap")' "$REPORT_FILE" >/dev/null 2>&1 && \
+   jq -e '.encrypted_swap | length > 0' "$REPORT_FILE" >/dev/null 2>&1; then
+    jq -r '.encrypted_swap[]?' "$REPORT_FILE" 2>/dev/null | while read -r line; do
+        if [ -n "$line" ] && [ "$line" != "null" ]; then
+            echo "- $line"
+        fi
     done
 else
     echo "- None detected"
