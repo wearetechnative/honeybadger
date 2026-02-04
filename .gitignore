@@ -1,4 +1,5 @@
 .aider*
-honeybadger.*tar.*
+**.tar
+**.bz2
 output-*/
 
