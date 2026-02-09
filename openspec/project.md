@@ -108,7 +108,12 @@ The tool specifically targets ISO27001 compliance requirements for personal devi
 - Output directory: output-{username}-{date}/
 - Generated reports:
   - lynis-report.json: Security audit in JSON format
-  - os-kernel-status.txt: OS and kernel version analysis
+  - os-kernel-status.txt: OS and kernel version analysis with PASS/FAIL verdict
+    - Section 1: Operating system version and EOL status
+    - Section 2: Kernel version information
+    - Overall System Status: Clear PASS/FAIL/WARNING/UNKNOWN result
+    - Recommendations: Specific actions based on status
+    - ISO27001 compliance notes for failing systems
   - neofetch.txt: System information
   - honeybadger-info.txt: Tool version info
   - blockdevices.txt: Storage configuration
@@ -129,7 +134,12 @@ The tool specifically targets ISO27001 compliance requirements for personal devi
   - Auto-detects and extracts tarballs when directory not found
   - Prompts before overwriting existing directories (accepts y/n/yes/no)
   - Automatically fetches latest release information
-  - Generates OS/kernel status report
+  - Generates OS/kernel status report with PASS/FAIL conclusion
+  - Provides specific recommendations based on system status:
+    - **PASS**: System is current, continue regular updates
+    - **WARNING**: System is older but supported, upgrade recommended
+    - **FAIL**: System is EOL, immediate upgrade required with security warnings
+    - **UNKNOWN**: Unable to determine status, manual verification needed
   - Auto-cleanup of extracted files
 
 - **fetch-releases** `[cache-dir]`: Update cached OS release information from APIs

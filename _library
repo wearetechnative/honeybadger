@@ -357,26 +357,30 @@ check_os_status() {
     [[ -n "$OS_FULLNAME" ]] && echo "Full Name: $OS_FULLNAME" >> "$report_file"
     echo "" >> "$report_file"
 
+    # Variable to track overall status
+    local os_status_result="unknown"
+
     # Analyze based on OS type
     case "$OS_NAME" in
         NixOS)
-            analyze_nixos_status "$report_file" "$cache_dir"
+            os_status_result=$(analyze_nixos_status "$report_file" "$cache_dir")
             ;;
         Ubuntu)
-            analyze_ubuntu_status "$report_file" "$cache_dir"
+            os_status_result=$(analyze_ubuntu_status "$report_file" "$cache_dir")
             ;;
         Debian)
-            analyze_debian_status "$report_file" "$cache_dir"
+            os_status_result=$(analyze_debian_status "$report_file" "$cache_dir")
             ;;
         Arch|"Arch Linux")
-            analyze_arch_status "$report_file"
+            os_status_result=$(analyze_arch_status "$report_file")
             ;;
         Kali|"Kali Linux")
-            analyze_kali_status "$report_file"
+            os_status_result=$(analyze_kali_status "$report_file")
             ;;
         *)
             echo "Distribution: $OS_NAME (Unknown/Unsupported)" >> "$report_file"
             echo "Status: UNABLE TO DETERMINE" >> "$report_file"
+            os_status_result="unknown"
             ;;
     esac
 
@@ -385,14 +389,15 @@ check_os_status() {
         analyze_kernel_status "$report_file" "$cache_dir"
     fi
 
-    # Generate summary
-    generate_status_summary "$report_file"
+    # Generate summary with status and recommendations
+    generate_status_summary "$report_file" "$os_status_result" "$cache_dir"
 
     # Print report
     cat "$report_file"
 }
 
 # Analyze NixOS status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
 analyze_nixos_status() {
     local report_file="$1"
     local cache_dir="$2"
@@ -403,6 +408,7 @@ analyze_nixos_status() {
     local nixos_status=$(check_nixos_is_current "$OS_VERSION" "$cache_dir")
     local nixos_eol=$(get_nixos_eol_date "$OS_VERSION" "$cache_dir")
     local latest_nixos=$(get_latest_nixos_release "$cache_dir")
+    local result="unknown"
 
     echo "1. IS CURRENT OS VERSION AN ACTIVE UPDATE STREAM?" >> "$report_file"
     echo "---------------------------------------------------" >> "$report_file"
@@ -411,27 +417,39 @@ analyze_nixos_status() {
         current)
             echo "Status: YES - CURRENT STABLE RELEASE" >> "$report_file"
             echo "Update Stream: ACTIVE" >> "$report_file"
+            result="pass"
             ;;
-        previous)
-            echo "Status: YES - PREVIOUS STABLE (still supported)" >> "$report_file"
+        previous|supported)
+            if [[ "$nixos_status" == "previous" ]]; then
+                echo "Status: YES - PREVIOUS STABLE (still supported)" >> "$report_file"
+            else
+                echo "Status: YES - OLDER VERSION (still receiving updates)" >> "$report_file"
+            fi
             echo "Update Stream: ACTIVE (but upgrade recommended)" >> "$report_file"
+            [[ -n "$nixos_eol" ]] && echo "Support until: $nixos_eol" >> "$report_file"
             [[ -n "$latest_nixos" ]] && echo "Recommendation: Upgrade to $latest_nixos" >> "$report_file"
+            result="warning"
             ;;
         eol)
-            echo "Status: NO - EOL REACHED" >> "$report_file"
-            echo "Update Stream: EOL (End of Life)" >> "$report_file"
+            echo "Status: NO - END OF LIFE" >> "$report_file"
+            echo "Update Stream: INACTIVE (no longer receives updates)" >> "$report_file"
+            [[ -n "$nixos_eol" ]] && echo "EOL Date: $nixos_eol" >> "$report_file"
             [[ -n "$latest_nixos" ]] && echo "CRITICAL: Upgrade to NixOS $latest_nixos immediately" >> "$report_file"
+            result="fail"
             ;;
         *)
             echo "Status: UNKNOWN VERSION" >> "$report_file"
             echo "Update Stream: UNABLE TO DETERMINE" >> "$report_file"
+            result="unknown"
             ;;
     esac
 
     echo "" >> "$report_file"
+    echo "$result"
 }
 
 # Analyze Ubuntu status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
 analyze_ubuntu_status() {
     local report_file="$1"
     local cache_dir="$2"
@@ -442,30 +460,39 @@ analyze_ubuntu_status() {
     echo "---------------------------------------------------" >> "$report_file"
 
     local ubuntu_status=$(check_ubuntu_is_current "$OS_VERSION" "$cache_dir")
+    local latest_ubuntu=$(get_latest_ubuntu_lts "$cache_dir")
+    local result="unknown"
 
     case "$ubuntu_status" in
         current)
             echo "Status: YES - CURRENT LTS" >> "$report_file"
             echo "Update Stream: ACTIVE" >> "$report_file"
+            result="pass"
             ;;
         supported)
-            echo "Status: YES - LTS (supported)" >> "$report_file"
-            echo "Update Stream: ACTIVE" >> "$report_file"
+            echo "Status: YES - OLDER LTS (still receiving updates)" >> "$report_file"
+            echo "Update Stream: ACTIVE (but upgrade recommended)" >> "$report_file"
+            [[ -n "$latest_ubuntu" ]] && echo "Recommendation: Upgrade to Ubuntu $latest_ubuntu LTS" >> "$report_file"
+            result="warning"
             ;;
         eol)
-            echo "Status: NO - EOL REACHED" >> "$report_file"
-            echo "Update Stream: INACTIVE" >> "$report_file"
-            echo "CRITICAL: Upgrade to latest Ubuntu LTS immediately" >> "$report_file"
+            echo "Status: NO - END OF LIFE" >> "$report_file"
+            echo "Update Stream: INACTIVE (no longer receives updates)" >> "$report_file"
+            [[ -n "$latest_ubuntu" ]] && echo "CRITICAL: Upgrade to Ubuntu $latest_ubuntu LTS immediately" >> "$report_file"
+            result="fail"
             ;;
         *)
             echo "Status: UNKNOWN VERSION" >> "$report_file"
+            result="unknown"
             ;;
     esac
 
     echo "" >> "$report_file"
+    echo "$result"
 }
 
 # Analyze Debian status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
 analyze_debian_status() {
     local report_file="$1"
     local cache_dir="$2"
@@ -473,9 +500,11 @@ analyze_debian_status() {
     echo "Distribution: Debian GNU/Linux" >> "$report_file"
     echo "Version: $OS_VERSION" >> "$report_file"
     echo "" >> "$report_file"
+    echo "pass"
 }
 
 # Analyze Arch status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
 analyze_arch_status() {
     local report_file="$1"
 
@@ -483,9 +512,11 @@ analyze_arch_status() {
     echo "Status: YES - ALWAYS CURRENT (if regularly updated)" >> "$report_file"
     echo "Update Stream: ROLLING RELEASE (no versions)" >> "$report_file"
     echo "" >> "$report_file"
+    echo "pass"
 }
 
 # Analyze Kali status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
 analyze_kali_status() {
     local report_file="$1"
 
@@ -493,6 +524,7 @@ analyze_kali_status() {
     echo "Status: YES - ROLLING RELEASE" >> "$report_file"
     echo "Update Stream: ACTIVE" >> "$report_file"
     echo "" >> "$report_file"
+    echo "pass"
 }
 
 # Analyze kernel status (helper function)
@@ -511,6 +543,101 @@ analyze_kernel_status() {
 # Generate status summary (helper function)
 generate_status_summary() {
     local report_file="$1"
+    local os_status="$2"
+    local cache_dir="$3"
+
+    echo "" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "OVERALL SYSTEM STATUS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+
+    # Determine overall status
+    case "$os_status" in
+        pass)
+            echo "Result: ✓ PASS" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Your system is running a supported operating system version" >> "$report_file"
+            echo "with an active update stream. No immediate action required." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Recommendations:" >> "$report_file"
+            echo "  - Continue applying regular system updates" >> "$report_file"
+            echo "  - Monitor for new releases and security updates" >> "$report_file"
+            echo "  - Review this report periodically (at least quarterly)" >> "$report_file"
+            ;;
+        warning)
+            echo "Result: ⚠ WARNING" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Your system is NOT running the latest version but STILL RECEIVES UPDATES." >> "$report_file"
+            echo "An upgrade is recommended but not critical." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Recommendations:" >> "$report_file"
+            echo "  - Plan an upgrade to the latest stable release" >> "$report_file"
+            echo "  - Continue applying security updates in the meantime" >> "$report_file"
+            echo "  - Review the upgrade path and test in a staging environment" >> "$report_file"
+
+            # Add specific upgrade recommendation if available
+            local latest_release=""
+            case "$OS_NAME" in
+                NixOS)
+                    latest_release=$(get_latest_nixos_release "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  - Target version: NixOS $latest_release" >> "$report_file"
+                    ;;
+                Ubuntu)
+                    latest_release=$(get_latest_ubuntu_lts "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  - Target version: Ubuntu $latest_release LTS" >> "$report_file"
+                    ;;
+            esac
+            ;;
+        fail)
+            echo "Result: ✗ FAIL" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "CRITICAL: Your system NO LONGER RECEIVES UPDATES (End-of-Life)." >> "$report_file"
+            echo "This version has reached EOL and no longer receives security updates." >> "$report_file"
+            echo "This poses a significant security risk." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "URGENT Actions Required:" >> "$report_file"
+            echo "  1. DO NOT connect this system to untrusted networks" >> "$report_file"
+            echo "  2. Plan an immediate upgrade to a supported version" >> "$report_file"
+            echo "  3. If upgrade is not immediately possible:" >> "$report_file"
+            echo "     - Isolate the system from the internet" >> "$report_file"
+            echo "     - Restrict network access to essential services only" >> "$report_file"
+            echo "     - Increase monitoring and auditing" >> "$report_file"
+            echo "  4. Document the security risk and create an upgrade timeline" >> "$report_file"
+
+            # Add specific upgrade recommendation if available
+            local latest_release=""
+            case "$OS_NAME" in
+                NixOS)
+                    latest_release=$(get_latest_nixos_release "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  5. Upgrade to: NixOS $latest_release" >> "$report_file"
+                    ;;
+                Ubuntu)
+                    latest_release=$(get_latest_ubuntu_lts "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  5. Upgrade to: Ubuntu $latest_release LTS" >> "$report_file"
+                    ;;
+            esac
+
+            echo "" >> "$report_file"
+            echo "ISO27001 Compliance Note:" >> "$report_file"
+            echo "Running EOL software may violate security policies and compliance" >> "$report_file"
+            echo "requirements. Document this finding and escalate appropriately." >> "$report_file"
+            ;;
+        *)
+            echo "Result: ? UNKNOWN" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Unable to determine system status. This may be due to:" >> "$report_file"
+            echo "  - Unsupported or unrecognized operating system" >> "$report_file"
+            echo "  - Missing or incomplete system information" >> "$report_file"
+            echo "  - Unable to fetch release data from external sources" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Recommendations:" >> "$report_file"
+            echo "  - Verify system information is correctly reported" >> "$report_file"
+            echo "  - Check internet connectivity for release data updates" >> "$report_file"
+            echo "  - Manually verify OS version support status" >> "$report_file"
+            echo "  - Consult your OS vendor's support lifecycle documentation" >> "$report_file"
+            ;;
+    esac
 
     echo "" >> "$report_file"
     echo "=====================================" >> "$report_file"
