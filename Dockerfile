@@ -11,6 +11,9 @@ RUN apt-get update && apt-get -y install --no-install-recommends \
     ca-certificates \
     make \
     jq \
+    pandoc \
+    texlive-latex-base \
+    texlive-latex-recommended \
     # Dependencies for wkhtmltopdf
     fontconfig \
     libfreetype6 \

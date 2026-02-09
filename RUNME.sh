@@ -1,4 +1,5 @@
-#!/usr/bin/env bash #(C)2019-2022 Pim Snel - https://github.com/mipmip/RUNME.sh
+#!/usr/bin/env bash
+#(C)2019-2022 Pim Snel - https://github.com/mipmip/RUNME.sh
 CMDS=();DESC=();NARGS=$#;ARG1=$1;shift;ARGS="$@";make_command(){ CMDS+=($1);DESC+=("$2");};usage(){ printf "\nUsage: %s [command]\n\nCommands:\n" $0;line="              ";for((i=0;i<=$(( ${#CMDS[*]} -1));i++));do printf "  %s %s ${DESC[$i]}\n" ${CMDS[$i]} "${line:${#CMDS[$i]}}";done;echo;};runme(){ if test $NARGS -ge 1;then eval "$ARG1 $ARGS"||usage;else usage;fi;}
 
 ##### LOAD LIBRARIES #####
@@ -24,7 +25,7 @@ function show_version(){
   echo
   echo "    http://github.com/wearetechnative/personal-device-audit"
   echo
-  echo "    by Pim, Wouter, et al."
+  echo "    by Pim, Wouter et al."
   echo "    © Technative 2024"
   echo
 }

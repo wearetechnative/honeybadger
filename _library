@@ -818,16 +818,6 @@ generate_warnings_report() {
         return 1
     fi
 
-    # Detect available PDF converter
-    local pdf_converter="none"
-    if command -v wkhtmltopdf >/dev/null 2>&1; then
-        pdf_converter="wkhtmltopdf"
-    elif command -v weasyprint >/dev/null 2>&1; then
-        pdf_converter="weasyprint"
-    elif command -v pandoc >/dev/null 2>&1; then
-        pdf_converter="pandoc"
-    fi
-
     # Extract data from JSON
     local hostname=$(jq -r '.hostname // "Unknown"' "$input_json" 2>/dev/null)
     local os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$input_json" 2>/dev/null)
@@ -993,35 +983,27 @@ HTML_FOOTER
     cp "$temp_html" "$output_html"
     echo "✓ HTML report generated: $output_html"
 
-    # Try to convert to PDF if converter available
-    if [[ "$pdf_converter" != "none" ]]; then
-        local pdf_success=false
-        case "$pdf_converter" in
-            wkhtmltopdf)
-                if wkhtmltopdf --quiet --enable-local-file-access "$temp_html" "$output_pdf" 2>/dev/null; then
-                    pdf_success=true
-                fi
-                ;;
-            weasyprint)
-                if weasyprint "$temp_html" "$output_pdf" 2>/dev/null; then
-                    pdf_success=true
-                fi
-                ;;
-            pandoc)
-                if pandoc "$temp_html" -o "$output_pdf" --pdf-engine=wkhtmltopdf 2>/dev/null || \
-                   pandoc "$temp_html" -o "$output_pdf" 2>/dev/null; then
-                    pdf_success=true
-                fi
-                ;;
-        esac
+    # Try to convert HTML to PDF using Docker container with wkhtmltopdf
+    echo "Converting HTML to PDF using Docker..."
+    local html_dir=$(dirname "$output_html")
+    local html_filename=$(basename "$output_html")
+    local pdf_filename=$(basename "$output_pdf")
 
-        if [[ "$pdf_success" == "true" && -f "$output_pdf" ]]; then
-            echo "✓ PDF report generated: $output_pdf"
-        else
-            echo "⚠ PDF conversion failed using $pdf_converter, HTML version available"
-        fi
+    docker run --rm \
+        -v "$html_dir:/data:rw" \
+        --entrypoint /usr/local/bin/wkhtmltopdf \
+        wearetechnative/lynis-report-converter:latest \
+        --quiet --enable-local-file-access \
+        "/data/$html_filename" "/data/$pdf_filename" >/dev/null 2>&1
+
+    # Check if PDF was successfully created
+    if [[ -f "$output_pdf" ]]; then
+        # Fix ownership (Docker runs as root, so PDF is owned by root)
+        chmod 644 "$output_pdf" 2>/dev/null || true
+        chown --reference="$output_html" "$output_pdf" 2>/dev/null || true
+        echo "✓ PDF report generated: $output_pdf"
     else
-        echo "⚠ No PDF converter available (install wkhtmltopdf, weasyprint, or pandoc)"
+        echo "⚠ PDF conversion failed, HTML version available at: $output_html"
     fi
 
     # Cleanup
