@@ -2,7 +2,7 @@ FROM debian:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install only required dependencies in a single layer
+# Install system dependencies
 RUN apt-get update && apt-get -y install --no-install-recommends \
     wget \
     unzip \
@@ -10,12 +10,29 @@ RUN apt-get update && apt-get -y install --no-install-recommends \
     cpanminus \
     ca-certificates \
     make \
+    jq \
+    # Dependencies for wkhtmltopdf
+    fontconfig \
+    libfreetype6 \
+    libjpeg62-turbo \
+    libpng16-16 \
+    libx11-6 \
+    libxcb1 \
+    libxext6 \
+    libxrender1 \
+    xfonts-75dpi \
+    xfonts-base \
     # Perl dependencies from system packages (faster than CPAN)
     libxml-writer-perl \
     libarchive-zip-perl \
     libjson-perl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install wkhtmltopdf from official releases
+RUN wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb -O /tmp/wkhtmltox.deb \
+    && dpkg -i /tmp/wkhtmltox.deb || apt-get install -f -y \
+    && rm -f /tmp/wkhtmltox.deb
 
 # Install only required Perl modules from CPAN (multi-stage for better caching)
 RUN cpanm --notest --quiet \

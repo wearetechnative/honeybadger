@@ -382,6 +382,14 @@ audit(){
 
    # Run OS/kernel status check
    check_os_status "$output" .cache || echo "  Warning: Could not complete OS/kernel analysis"
+
+   # Generate asset inventory
+   echo "Generating asset inventory..."
+   generate_asset_inventory "$output" >/dev/null || echo "  Warning: Could not generate asset inventory"
+
+   # Generate warnings/suggestions report
+   echo "Generating warnings and suggestions report..."
+   generate_warnings_report "$output/lynis-report.json" "$output/lynis-report-warnings_fails" || echo "  Warning: Could not generate warnings report"
  else
    echo "  Skipping OS/kernel analysis (jq not available or lynis report missing)"
  fi
@@ -481,10 +489,15 @@ check-output(){
  fetch_os_releases .cache
  echo ""
 
- # Run the check
+ # Run the OS status check
  check_os_status "$output_dir"
 
  local exit_code=$?
+
+ # Generate asset inventory
+ echo ""
+ echo "Generating asset inventory..."
+ generate_asset_inventory "$output_dir"
 
  # Cleanup extracted directory if we created it
  if [[ "$cleanup_extracted" == true ]]; then

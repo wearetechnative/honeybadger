@@ -644,3 +644,387 @@ generate_status_summary() {
     echo "END OF REPORT" >> "$report_file"
     echo "=====================================" >> "$report_file"
 }
+
+# ==============================================================================
+# ASSET INVENTORY FUNCTIONS
+# ==============================================================================
+
+# Generate asset inventory table from available data
+# Usage: generate_asset_inventory <output_dir>
+generate_asset_inventory() {
+    local output_dir="$1"
+    local report_file="$output_dir/asset-inventory.txt"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Directory $output_dir does not exist"
+        return 1
+    fi
+
+    # Extract data from available files
+    local hostname=""
+    local os_full=""
+    local os_version=""
+    local kernel=""
+    local model=""
+    local serial=""
+    local disk_encrypted="Unknown"
+    local screen_lock="Unknown"
+    local nix_installed="Unknown"
+    local malware_scanner="Unknown"
+    local firewall_active="Unknown"
+    local os_uptodate="Unknown"
+    local owner=""
+    local report_date=""
+
+    # Get hostname and OS info from lynis-report.json
+    if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
+        hostname=$(jq -r '.hostname // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        os_version=$(jq -r '.os_version // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        malware_scanner=$(jq -r '.malware_scanner_installed // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
+        [[ "$malware_scanner" == "1" ]] && malware_scanner="Yes" || malware_scanner="No"
+        firewall_active=$(jq -r '.firewall_active // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
+        [[ "$firewall_active" == "1" ]] && firewall_active="Yes" || firewall_active="No"
+    fi
+
+    # Get hardware info from neofetch.txt
+    if [[ -f "$output_dir/neofetch.txt" ]]; then
+        owner=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f1 | head -1)
+        model=$(grep "^Host:" "$output_dir/neofetch.txt" | sed 's/^Host: //' | head -1)
+
+        # Get kernel version from neofetch (more reliable than lynis)
+        kernel=$(grep "^Kernel:" "$output_dir/neofetch.txt" | sed 's/^Kernel: //' | head -1)
+
+        # If hostname not found in lynis, get from neofetch
+        if [[ "$hostname" == "Unknown" ]]; then
+            hostname=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f2 | awk '{print $1}' | head -1)
+        fi
+    fi
+
+    # Check for disk encryption from blockdevices.txt
+    if [[ -f "$output_dir/blockdevices.txt" ]]; then
+        if grep -q "crypto_LUKS" "$output_dir/blockdevices.txt"; then
+            disk_encrypted="Yes (LUKS)"
+        else
+            disk_encrypted="No"
+        fi
+    fi
+
+    # Check screen lock from screenlock-info.txt
+    if [[ -f "$output_dir/screenlock-info.txt" ]]; then
+        if grep -q "AUTO-LOCK-STATUS: ENABLED" "$output_dir/screenlock-info.txt"; then
+            screen_lock="Yes (Auto-lock enabled)"
+            # Extract the human-readable part (e.g., "10 minutes")
+            local lock_time=$(grep "Total time until auto-lock:" "$output_dir/screenlock-info.txt" | grep -oP '\([0-9]+ [a-z]+\)' | tr -d '()')
+            [[ -n "$lock_time" ]] && screen_lock="Yes (Auto-lock: $lock_time)"
+        else
+            screen_lock="Not detected / Disabled"
+        fi
+    fi
+
+    # Check for Nix installation
+    if [[ "$os_full" =~ "NixOS" ]]; then
+        nix_installed="Yes (NixOS)"
+    elif [[ -f "$output_dir/neofetch.txt" ]] && grep -q "nix-" "$output_dir/neofetch.txt"; then
+        nix_installed="Yes"
+    elif [[ -f "$output_dir/installed-packages.txt" ]] && grep -qi "nix" "$output_dir/installed-packages.txt"; then
+        nix_installed="Yes"
+    else
+        nix_installed="No"
+    fi
+
+    # Check OS up-to-date status from os-kernel-status.txt
+    if [[ -f "$output_dir/os-kernel-status.txt" ]]; then
+        if grep -q "Result: ✓ PASS" "$output_dir/os-kernel-status.txt"; then
+            os_uptodate="Yes (Current)"
+        elif grep -q "Result: ⚠ WARNING" "$output_dir/os-kernel-status.txt"; then
+            os_uptodate="Supported (Upgrade recommended)"
+        elif grep -q "Result: ✗ FAIL" "$output_dir/os-kernel-status.txt"; then
+            os_uptodate="No (EOL)"
+        else
+            os_uptodate="Unknown"
+        fi
+    fi
+
+    # Get report date from directory name or file timestamp
+    if [[ "$output_dir" =~ ([0-9]{2}-[0-9]{2}-[0-9]{4}) ]]; then
+        report_date="${BASH_REMATCH[1]}"
+    elif [[ -f "$output_dir/lynis-report.json" ]]; then
+        report_date=$(date -r "$output_dir/lynis-report.json" +"%d-%m-%Y" 2>/dev/null)
+    fi
+
+    # Generate report
+    echo "=====================================" > "$report_file"
+    echo "  ASSET INVENTORY" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "This table contains asset information extracted from the audit report." >> "$report_file"
+    echo "" >> "$report_file"
+
+    # Create table
+    printf "%-35s | %s\n" "Field" "Value" >> "$report_file"
+    printf "%-35s-+-" "-----------------------------------" >> "$report_file"
+    printf "%s\n" "----------------------------------------" >> "$report_file"
+    printf "%-35s | %s\n" "Hostname (Asset ID)" "$hostname" >> "$report_file"
+    printf "%-35s | %s\n" "Serial Number / Model" "$model" >> "$report_file"
+    printf "%-35s | %s\n" "Description" "Personal Device" >> "$report_file"
+    printf "%-35s | %s\n" "OS Edition + Version" "$os_full" >> "$report_file"
+    printf "%-35s | %s\n" "Kernel Version" "$kernel" >> "$report_file"
+    printf "%-35s | %s\n" "Nix Installed" "$nix_installed" >> "$report_file"
+    printf "%-35s | %s\n" "Disk Encryption" "$disk_encrypted" >> "$report_file"
+    printf "%-35s | %s\n" "Screen Lock" "$screen_lock" >> "$report_file"
+    printf "%-35s | %s\n" "Malware Scanner" "$malware_scanner" >> "$report_file"
+    printf "%-35s | %s\n" "Firewall Active" "$firewall_active" >> "$report_file"
+    printf "%-35s | %s\n" "OS Up-to-date" "$os_uptodate" >> "$report_file"
+    printf "%-35s | %s\n" "Owner / User" "$owner" >> "$report_file"
+    printf "%-35s | %s\n" "Last Audit Date" "$report_date" >> "$report_file"
+
+    echo "" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "Notes:" >> "$report_file"
+    echo "  - Serial number may require manual verification" >> "$report_file"
+    echo "  - 'No suspicious software detected' requires manual review of:" >> "$report_file"
+    echo "    * installed-packages.txt" >> "$report_file"
+    echo "    * lynis-report.json security warnings" >> "$report_file"
+    echo "  - Defender (AV) status: See 'Malware Scanner' field" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+
+    cat "$report_file"
+    return 0
+}
+
+# ==============================================================================
+# WARNINGS/SUGGESTIONS REPORT GENERATION
+# ==============================================================================
+
+# Generate warnings and suggestions HTML/PDF report
+# Usage: generate_warnings_report <lynis_json> <output_base>
+# Output: Creates ${output_base}.html and optionally ${output_base}.pdf
+generate_warnings_report() {
+    local input_json="$1"
+    local output_base="$2"
+    local output_html="${output_base}.html"
+    local output_pdf="${output_base}.pdf"
+    local temp_html="/tmp/lynis-warnings-$$.html"
+
+    if [[ ! -f "$input_json" ]]; then
+        echo "ERROR: Input file $input_json does not exist"
+        return 1
+    fi
+
+    # Check jq dependency
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: jq is required for warnings report generation"
+        return 1
+    fi
+
+    # Detect available PDF converter
+    local pdf_converter="none"
+    if command -v wkhtmltopdf >/dev/null 2>&1; then
+        pdf_converter="wkhtmltopdf"
+    elif command -v weasyprint >/dev/null 2>&1; then
+        pdf_converter="weasyprint"
+    elif command -v pandoc >/dev/null 2>&1; then
+        pdf_converter="pandoc"
+    fi
+
+    # Extract data from JSON
+    local hostname=$(jq -r '.hostname // "Unknown"' "$input_json" 2>/dev/null)
+    local os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$input_json" 2>/dev/null)
+    local report_date=$(jq -r '.report_datetime_start // "Unknown"' "$input_json" 2>/dev/null)
+    local lynis_version=$(jq -r '.lynis_version // "Unknown"' "$input_json" 2>/dev/null)
+    local warning_count=$(jq -r '.["warning[]"] | length' "$input_json" 2>/dev/null)
+    local suggestion_count=$(jq -r '.["suggestion[]"] | length' "$input_json" 2>/dev/null)
+
+    # Generate HTML
+    cat > "$temp_html" <<'HTML_HEADER'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Lynis Security Audit - Warnings and Suggestions</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #e74c3c;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #95a5a6;
+            padding-bottom: 5px;
+            margin-top: 30px;
+        }
+        .header-info {
+            background-color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+        .header-info p {
+            margin: 5px 0;
+        }
+        .summary {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .warning {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        .warning-id {
+            font-weight: bold;
+            color: #721c24;
+        }
+        .suggestion {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        .suggestion-id {
+            font-weight: bold;
+            color: #0c5460;
+        }
+        .severity {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .severity-high { background-color: #dc3545; color: white; }
+        .severity-medium { background-color: #ffc107; color: #333; }
+        .severity-low { background-color: #28a745; color: white; }
+        .no-issues {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            color: #155724;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ccc;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Lynis Security Audit Report</h1>
+    <h2>Warnings and Suggestions</h2>
+
+    <div class="header-info">
+HTML_HEADER
+
+    # Add header information
+    cat >> "$temp_html" <<EOF
+        <p><strong>Hostname:</strong> $hostname</p>
+        <p><strong>Operating System:</strong> $os_full</p>
+        <p><strong>Report Date:</strong> $report_date</p>
+        <p><strong>Lynis Version:</strong> $lynis_version</p>
+    </div>
+
+    <div class="summary">
+        <p><strong>Summary:</strong></p>
+        <p>⚠️  Warnings: $warning_count</p>
+        <p>💡 Suggestions: $suggestion_count</p>
+    </div>
+EOF
+
+    # Add warnings section
+    cat >> "$temp_html" <<'WARNINGS_HEADER'
+    <h2>⚠️  Warnings</h2>
+WARNINGS_HEADER
+
+    if [[ "$warning_count" -gt 0 ]]; then
+        jq -r '.["warning[]"] | to_entries | .[] |
+            "<div class=\"warning\">" +
+            "<span class=\"warning-id\">WARNING:</span> " +
+            (.value | tostring) +
+            "</div>"' "$input_json" >> "$temp_html" 2>/dev/null
+    else
+        echo '<div class="no-issues">✓ No warnings found. Great job!</div>' >> "$temp_html"
+    fi
+
+    # Add suggestions section
+    cat >> "$temp_html" <<'SUGGESTIONS_HEADER'
+    <h2>💡 Suggestions</h2>
+SUGGESTIONS_HEADER
+
+    if [[ "$suggestion_count" -gt 0 ]]; then
+        jq -r '.["suggestion[]"] | .[] |
+            "<div class=\"suggestion\">" +
+            "<span class=\"suggestion-id\">" + .id + "</span>" +
+            (if .severity and .severity != "NA" and .severity != null then
+                " <span class=\"severity severity-" + (.severity | ascii_downcase) + "\">" + .severity + "</span>"
+            else "" end) +
+            "<p>" + .description + "</p>" +
+            "</div>"' "$input_json" >> "$temp_html" 2>/dev/null
+    else
+        echo '<div class="no-issues">✓ No suggestions. System is well configured!</div>' >> "$temp_html"
+    fi
+
+    # Add footer
+    cat >> "$temp_html" <<'HTML_FOOTER'
+    <div class="footer">
+        <p>Generated by Honeybadger - Personal Device Audit Tool</p>
+        <p>🦡 Make your computer as tough as a honeybadger</p>
+        <p><a href="https://github.com/wearetechnative/personal-device-audit">github.com/wearetechnative/personal-device-audit</a></p>
+    </div>
+</body>
+</html>
+HTML_FOOTER
+
+    # Always save HTML
+    cp "$temp_html" "$output_html"
+    echo "✓ HTML report generated: $output_html"
+
+    # Try to convert to PDF if converter available
+    if [[ "$pdf_converter" != "none" ]]; then
+        local pdf_success=false
+        case "$pdf_converter" in
+            wkhtmltopdf)
+                if wkhtmltopdf --quiet --enable-local-file-access "$temp_html" "$output_pdf" 2>/dev/null; then
+                    pdf_success=true
+                fi
+                ;;
+            weasyprint)
+                if weasyprint "$temp_html" "$output_pdf" 2>/dev/null; then
+                    pdf_success=true
+                fi
+                ;;
+            pandoc)
+                if pandoc "$temp_html" -o "$output_pdf" --pdf-engine=wkhtmltopdf 2>/dev/null || \
+                   pandoc "$temp_html" -o "$output_pdf" 2>/dev/null; then
+                    pdf_success=true
+                fi
+                ;;
+        esac
+
+        if [[ "$pdf_success" == "true" && -f "$output_pdf" ]]; then
+            echo "✓ PDF report generated: $output_pdf"
+        else
+            echo "⚠ PDF conversion failed using $pdf_converter, HTML version available"
+        fi
+    else
+        echo "⚠ No PDF converter available (install wkhtmltopdf, weasyprint, or pandoc)"
+    fi
+
+    # Cleanup
+    rm -f "$temp_html"
+    return 0
+}
