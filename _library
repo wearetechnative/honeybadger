@@ -1,0 +1,519 @@
+#!/usr/bin/env bash
+#
+# os-status.sh - Library for OS and Kernel status checking
+#
+# This library provides functions to check OS and kernel status,
+# fetch release information, and validate system versions.
+#
+# Usage: source this file in your scripts
+#
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+CACHE_DIR="${HONEYBADGER_CACHE_DIR:-.cache}"
+CACHE_TTL=86400  # 24 hours
+
+# ==============================================================================
+# CACHE MANAGEMENT FUNCTIONS
+# ==============================================================================
+
+# Check if cache file is still valid
+# Usage: is_cache_valid <cache_file> [ttl_seconds]
+is_cache_valid() {
+    local cache_file="$1"
+    local ttl="${2:-$CACHE_TTL}"
+
+    if [[ ! -f "$cache_file" ]]; then
+        return 1
+    fi
+
+    local now=$(date +%s)
+    local mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null)
+    local age=$((now - mtime))
+
+    if [[ $age -lt $ttl ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Fetch data from URL
+# Usage: fetch_url <url> <output_file>
+fetch_url() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -s -f "$url" > "$output" 2>/dev/null
+        return $?
+    else
+        echo "ERROR: curl not found" >&2
+        return 1
+    fi
+}
+
+# ==============================================================================
+# RELEASE DATA FETCHING FUNCTIONS
+# ==============================================================================
+
+# Fetch all OS and kernel release information
+# Usage: fetch_os_releases [cache_dir]
+fetch_os_releases() {
+    local cache_dir="${1:-$CACHE_DIR}"
+    mkdir -p "$cache_dir"
+
+    echo "Fetching latest OS and kernel release information..."
+    echo "Cache directory: $cache_dir"
+    echo ""
+
+    # Fetch NixOS releases
+    if ! is_cache_valid "$cache_dir/nixos-releases.json" "$CACHE_TTL"; then
+        echo "Fetching NixOS releases from endoflife.date..."
+        if fetch_url "https://endoflife.date/api/nixos.json" "$cache_dir/nixos-releases.json"; then
+            echo "  ✓ NixOS releases cached"
+        else
+            echo "  ✗ Failed to fetch NixOS releases"
+        fi
+    else
+        echo "  → NixOS releases cache is still valid"
+    fi
+
+    # Fetch Ubuntu releases
+    if ! is_cache_valid "$cache_dir/ubuntu-releases.json" "$CACHE_TTL"; then
+        echo "Fetching Ubuntu releases from endoflife.date..."
+        if fetch_url "https://endoflife.date/api/ubuntu.json" "$cache_dir/ubuntu-releases.json"; then
+            echo "  ✓ Ubuntu releases cached"
+        else
+            echo "  ✗ Failed to fetch Ubuntu releases"
+        fi
+    else
+        echo "  → Ubuntu releases cache is still valid"
+    fi
+
+    # Fetch Debian releases
+    if ! is_cache_valid "$cache_dir/debian-releases.json" "$CACHE_TTL"; then
+        echo "Fetching Debian releases from endoflife.date..."
+        if fetch_url "https://endoflife.date/api/debian.json" "$cache_dir/debian-releases.json"; then
+            echo "  ✓ Debian releases cached"
+        else
+            echo "  ✗ Failed to fetch Debian releases"
+        fi
+    else
+        echo "  → Debian releases cache is still valid"
+    fi
+
+    # Fetch Linux kernel releases
+    if ! is_cache_valid "$cache_dir/kernel-releases.json" "$CACHE_TTL"; then
+        echo "Fetching Linux kernel releases from kernel.org..."
+        if fetch_url "https://www.kernel.org/releases.json" "$cache_dir/kernel-releases.json"; then
+            echo "  ✓ Kernel releases cached"
+        else
+            echo "  ✗ Failed to fetch kernel releases"
+        fi
+    else
+        echo "  → Kernel releases cache is still valid"
+    fi
+
+    echo ""
+    echo "Cache update complete!"
+}
+
+# ==============================================================================
+# NIXOS QUERY FUNCTIONS
+# ==============================================================================
+
+# Get latest NixOS release version
+# Usage: get_latest_nixos_release [cache_dir]
+get_latest_nixos_release() {
+    local cache_dir="${1:-$CACHE_DIR}"
+    if [[ -f "$cache_dir/nixos-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r '.[0].cycle' "$cache_dir/nixos-releases.json" 2>/dev/null
+    fi
+}
+
+# Get NixOS EOL date for a specific version
+# Usage: get_nixos_eol_date <version> [cache_dir]
+get_nixos_eol_date() {
+    local version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+    if [[ -f "$cache_dir/nixos-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r ".[] | select(.cycle == \"$version\") | .eol" "$cache_dir/nixos-releases.json" 2>/dev/null
+    fi
+}
+
+# Check if NixOS version is current/supported
+# Usage: check_nixos_is_current <version> [cache_dir]
+# Returns: "current", "previous", "supported", "eol", or "unknown"
+check_nixos_is_current() {
+    local version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ -f "$cache_dir/nixos-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        local latest=$(jq -r '.[0].cycle' "$cache_dir/nixos-releases.json" 2>/dev/null)
+        if [[ "$version" == "$latest" ]]; then
+            echo "current"
+        else
+            local second_latest=$(jq -r '.[1].cycle' "$cache_dir/nixos-releases.json" 2>/dev/null)
+            if [[ "$version" == "$second_latest" ]]; then
+                echo "previous"
+            else
+                # Check if EOL has passed
+                local eol=$(jq -r ".[] | select(.cycle == \"$version\") | .eol" "$cache_dir/nixos-releases.json" 2>/dev/null)
+                if [[ -n "$eol" ]]; then
+                    local eol_ts=$(date -d "$eol" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$eol" +%s 2>/dev/null)
+                    local now_ts=$(date +%s)
+                    if [[ $now_ts -gt $eol_ts ]]; then
+                        echo "eol"
+                    else
+                        echo "supported"
+                    fi
+                else
+                    echo "unknown"
+                fi
+            fi
+        fi
+    fi
+}
+
+# ==============================================================================
+# UBUNTU QUERY FUNCTIONS
+# ==============================================================================
+
+# Get latest Ubuntu LTS version
+# Usage: get_latest_ubuntu_lts [cache_dir]
+get_latest_ubuntu_lts() {
+    local cache_dir="${1:-$CACHE_DIR}"
+    if [[ -f "$cache_dir/ubuntu-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r '.[] | select(.lts == true) | .cycle' "$cache_dir/ubuntu-releases.json" 2>/dev/null | head -1
+    fi
+}
+
+# Check if Ubuntu version is current/supported
+# Usage: check_ubuntu_is_current <version> [cache_dir]
+# Returns: "current", "supported", "eol", or "unknown"
+check_ubuntu_is_current() {
+    local version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ -f "$cache_dir/ubuntu-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        local is_eol=$(jq -r ".[] | select(.cycle == \"$version\") | .eol" "$cache_dir/ubuntu-releases.json" 2>/dev/null)
+        if [[ -n "$is_eol" ]]; then
+            local eol_ts=$(date -d "$is_eol" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$is_eol" +%s 2>/dev/null)
+            local now_ts=$(date +%s)
+            if [[ $now_ts -gt $eol_ts ]]; then
+                echo "eol"
+            else
+                local latest=$(jq -r '.[] | select(.lts == true) | .cycle' "$cache_dir/ubuntu-releases.json" 2>/dev/null | head -1)
+                if [[ "$version" == "$latest" ]]; then
+                    echo "current"
+                else
+                    echo "supported"
+                fi
+            fi
+        else
+            echo "unknown"
+        fi
+    fi
+}
+
+# ==============================================================================
+# KERNEL QUERY FUNCTIONS
+# ==============================================================================
+
+# Get kernel information
+# Usage: get_kernel_info <kernel_version> [cache_dir]
+get_kernel_info() {
+    local kernel_version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ -f "$cache_dir/kernel-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r ".releases[] | select(.version | startswith(\"$kernel_version\")) | {version: .version, moniker: .moniker, iseol: .iseol}" "$cache_dir/kernel-releases.json" 2>/dev/null | head -1
+    fi
+}
+
+# ==============================================================================
+# OS INFORMATION EXTRACTION
+# ==============================================================================
+
+# Extract OS information from Honeybadger output directory
+# Usage: extract_os_info <output_dir>
+# Sets global variables: OS_NAME, OS_VERSION, OS_CODENAME, OS_FULLNAME, KERNEL_VERSION
+extract_os_info() {
+    local output_dir="$1"
+
+    # Initialize variables
+    OS_NAME=""
+    OS_VERSION=""
+    OS_CODENAME=""
+    OS_FULLNAME=""
+    KERNEL_VERSION=""
+
+    # Try to get info from lynis-report.json (most reliable)
+    if [[ -f "$output_dir/lynis-report.json" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            OS_NAME=$(jq -r '.os_name // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+            OS_VERSION=$(jq -r '.os_version // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+            OS_FULLNAME=$(jq -r '.os_fullname // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+            KERNEL_RAW=$(jq -r '.linux_kernel_version // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+        fi
+    fi
+
+    # Fallback to neofetch.txt or fastfetch.txt
+    local fetch_file=""
+    if [[ -f "$output_dir/neofetch.txt" ]]; then
+        fetch_file="$output_dir/neofetch.txt"
+    elif [[ -f "$output_dir/fastfetch.txt" ]]; then
+        fetch_file="$output_dir/fastfetch.txt"
+    fi
+
+    if [[ -n "$fetch_file" ]]; then
+        # Get OS info if not already set
+        if [[ -z "$OS_NAME" ]]; then
+            local os_line=$(grep "^OS:" "$fetch_file" | head -1)
+            if [[ -n "$os_line" ]]; then
+                OS_FULLNAME=$(echo "$os_line" | sed 's/^OS: //')
+
+                # Handle different formats
+                if [[ "$OS_FULLNAME" =~ "Kali" ]]; then
+                    OS_NAME="Kali"
+                    OS_VERSION=$(echo "$OS_FULLNAME" | grep -oP 'Rolling|\d+\.\d+' | head -1)
+                else
+                    OS_NAME=$(echo "$OS_FULLNAME" | awk '{print $1}')
+                    OS_VERSION=$(echo "$OS_FULLNAME" | awk '{print $2}' | cut -d. -f1-2)
+                fi
+                OS_CODENAME=$(echo "$OS_FULLNAME" | grep -oP '\(\K[^)]+' || echo "")
+            fi
+        fi
+
+        # Always try to get kernel from fetch file
+        if [[ -z "$KERNEL_VERSION" ]]; then
+            local kernel_line=$(grep "^Kernel:" "$fetch_file" | head -1)
+            if [[ -n "$kernel_line" ]]; then
+                KERNEL_VERSION=$(echo "$kernel_line" | grep -oP '\d+\.\d+\.\d+' | head -1)
+            fi
+        fi
+    fi
+
+    # Fallback to lsb_release.txt
+    if [[ -z "$OS_NAME" && -f "$output_dir/lsb_release.txt" ]]; then
+        OS_NAME=$(grep "^Distributor ID:" "$output_dir/lsb_release.txt" | cut -d: -f2- | xargs)
+        OS_VERSION=$(grep "^Release:" "$output_dir/lsb_release.txt" | cut -d: -f2- | xargs)
+        OS_CODENAME=$(grep "^Codename:" "$output_dir/lsb_release.txt" | cut -d: -f2- | xargs)
+    fi
+
+    # Export variables for use in calling script
+    export OS_NAME OS_VERSION OS_CODENAME OS_FULLNAME KERNEL_VERSION
+}
+
+# ==============================================================================
+# OS STATUS CHECKING
+# ==============================================================================
+
+# Check OS status and generate report
+# Usage: check_os_status <output_dir> [cache_dir]
+check_os_status() {
+    local output_dir="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Directory $output_dir does not exist"
+        return 1
+    fi
+
+    # Fetch latest release info if needed
+    if [[ ! -d "$cache_dir" ]] || [[ ! -f "$cache_dir/nixos-releases.json" ]]; then
+        fetch_os_releases "$cache_dir" >/dev/null 2>&1
+    fi
+
+    # Extract OS information
+    extract_os_info "$output_dir"
+
+    if [[ -z "$OS_NAME" ]]; then
+        echo "ERROR: Unable to extract OS information from output files"
+        return 1
+    fi
+
+    # Generate report
+    local report_file="$output_dir/os-kernel-status.txt"
+
+    echo "=====================================" > "$report_file"
+    echo "  OS & KERNEL STATUS ANALYSIS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "Analysis Date: $(date)" >> "$report_file"
+    echo "Source: $output_dir" >> "$report_file"
+    echo "" >> "$report_file"
+
+    echo "=====================================" >> "$report_file"
+    echo "SECTION 1: OPERATING SYSTEM STATUS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+
+    echo "Detected OS: $OS_NAME" >> "$report_file"
+    echo "Version: $OS_VERSION" >> "$report_file"
+    [[ -n "$OS_CODENAME" ]] && echo "Codename: $OS_CODENAME" >> "$report_file"
+    [[ -n "$OS_FULLNAME" ]] && echo "Full Name: $OS_FULLNAME" >> "$report_file"
+    echo "" >> "$report_file"
+
+    # Analyze based on OS type
+    case "$OS_NAME" in
+        NixOS)
+            analyze_nixos_status "$report_file" "$cache_dir"
+            ;;
+        Ubuntu)
+            analyze_ubuntu_status "$report_file" "$cache_dir"
+            ;;
+        Debian)
+            analyze_debian_status "$report_file" "$cache_dir"
+            ;;
+        Arch|"Arch Linux")
+            analyze_arch_status "$report_file"
+            ;;
+        Kali|"Kali Linux")
+            analyze_kali_status "$report_file"
+            ;;
+        *)
+            echo "Distribution: $OS_NAME (Unknown/Unsupported)" >> "$report_file"
+            echo "Status: UNABLE TO DETERMINE" >> "$report_file"
+            ;;
+    esac
+
+    # Analyze kernel
+    if [[ -n "$KERNEL_VERSION" ]]; then
+        analyze_kernel_status "$report_file" "$cache_dir"
+    fi
+
+    # Generate summary
+    generate_status_summary "$report_file"
+
+    # Print report
+    cat "$report_file"
+}
+
+# Analyze NixOS status (helper function)
+analyze_nixos_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "Distribution: NixOS (Rolling/Stable)" >> "$report_file"
+    echo "" >> "$report_file"
+
+    local nixos_status=$(check_nixos_is_current "$OS_VERSION" "$cache_dir")
+    local nixos_eol=$(get_nixos_eol_date "$OS_VERSION" "$cache_dir")
+    local latest_nixos=$(get_latest_nixos_release "$cache_dir")
+
+    echo "1. IS CURRENT OS VERSION AN ACTIVE UPDATE STREAM?" >> "$report_file"
+    echo "---------------------------------------------------" >> "$report_file"
+
+    case "$nixos_status" in
+        current)
+            echo "Status: YES - CURRENT STABLE RELEASE" >> "$report_file"
+            echo "Update Stream: ACTIVE" >> "$report_file"
+            ;;
+        previous)
+            echo "Status: YES - PREVIOUS STABLE (still supported)" >> "$report_file"
+            echo "Update Stream: ACTIVE (but upgrade recommended)" >> "$report_file"
+            [[ -n "$latest_nixos" ]] && echo "Recommendation: Upgrade to $latest_nixos" >> "$report_file"
+            ;;
+        eol)
+            echo "Status: NO - EOL REACHED" >> "$report_file"
+            echo "Update Stream: EOL (End of Life)" >> "$report_file"
+            [[ -n "$latest_nixos" ]] && echo "CRITICAL: Upgrade to NixOS $latest_nixos immediately" >> "$report_file"
+            ;;
+        *)
+            echo "Status: UNKNOWN VERSION" >> "$report_file"
+            echo "Update Stream: UNABLE TO DETERMINE" >> "$report_file"
+            ;;
+    esac
+
+    echo "" >> "$report_file"
+}
+
+# Analyze Ubuntu status (helper function)
+analyze_ubuntu_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "Distribution: Ubuntu Linux" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "1. IS CURRENT OS VERSION AN ACTIVE UPDATE STREAM?" >> "$report_file"
+    echo "---------------------------------------------------" >> "$report_file"
+
+    local ubuntu_status=$(check_ubuntu_is_current "$OS_VERSION" "$cache_dir")
+
+    case "$ubuntu_status" in
+        current)
+            echo "Status: YES - CURRENT LTS" >> "$report_file"
+            echo "Update Stream: ACTIVE" >> "$report_file"
+            ;;
+        supported)
+            echo "Status: YES - LTS (supported)" >> "$report_file"
+            echo "Update Stream: ACTIVE" >> "$report_file"
+            ;;
+        eol)
+            echo "Status: NO - EOL REACHED" >> "$report_file"
+            echo "Update Stream: INACTIVE" >> "$report_file"
+            echo "CRITICAL: Upgrade to latest Ubuntu LTS immediately" >> "$report_file"
+            ;;
+        *)
+            echo "Status: UNKNOWN VERSION" >> "$report_file"
+            ;;
+    esac
+
+    echo "" >> "$report_file"
+}
+
+# Analyze Debian status (helper function)
+analyze_debian_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "Distribution: Debian GNU/Linux" >> "$report_file"
+    echo "Version: $OS_VERSION" >> "$report_file"
+    echo "" >> "$report_file"
+}
+
+# Analyze Arch status (helper function)
+analyze_arch_status() {
+    local report_file="$1"
+
+    echo "Distribution: Arch Linux (Rolling Release)" >> "$report_file"
+    echo "Status: YES - ALWAYS CURRENT (if regularly updated)" >> "$report_file"
+    echo "Update Stream: ROLLING RELEASE (no versions)" >> "$report_file"
+    echo "" >> "$report_file"
+}
+
+# Analyze Kali status (helper function)
+analyze_kali_status() {
+    local report_file="$1"
+
+    echo "Distribution: Kali Linux (Debian-based, Rolling)" >> "$report_file"
+    echo "Status: YES - ROLLING RELEASE" >> "$report_file"
+    echo "Update Stream: ACTIVE" >> "$report_file"
+    echo "" >> "$report_file"
+}
+
+# Analyze kernel status (helper function)
+analyze_kernel_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "=====================================" >> "$report_file"
+    echo "SECTION 2: KERNEL VERSION STATUS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "Detected Kernel: $KERNEL_VERSION" >> "$report_file"
+    echo "" >> "$report_file"
+}
+
+# Generate status summary (helper function)
+generate_status_summary() {
+    local report_file="$1"
+
+    echo "" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "END OF REPORT" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+}
