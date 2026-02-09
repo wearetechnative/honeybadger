@@ -25,6 +25,7 @@ thoroughly auditing device security configurations.
 - **tar**: Report packaging and compression (gzip compression)
 - **jq**: JSON parsing and processing
 - **curl**: Fetching release information from APIs
+- **wkhtmltopdf** (optional): HTML to PDF conversion in Docker container
 
 ## Project Conventions
 
@@ -34,7 +35,9 @@ thoroughly auditing device security configurations.
   - Cache management functions
   - OS/kernel release query functions
   - Status checking and analysis functions
-- **Dockerfile**: Container build configuration
+  - Asset inventory generation
+  - Warnings/suggestions report generation (HTML/PDF)
+- **Dockerfile**: Container build configuration (includes wkhtmltopdf for PDF generation)
 - **.cache/**: Cached API responses (24-hour TTL)
   - nixos-releases.json
   - ubuntu-releases.json
@@ -114,6 +117,23 @@ The tool specifically targets ISO27001 compliance requirements for personal devi
     - Overall System Status: Clear PASS/FAIL/WARNING/UNKNOWN result
     - Recommendations: Specific actions based on status
     - ISO27001 compliance notes for failing systems
+  - asset-inventory.txt: Asset registration information table
+    - Hostname/Asset ID, Serial/Model, OS Edition + Version
+    - Kernel Version, Nix Installation status
+    - Disk Encryption status (LUKS detection)
+    - Screen Lock configuration (auto-lock timeout)
+    - Malware Scanner and Firewall status
+    - OS Up-to-date status (Current/Supported/EOL)
+    - Owner/User, Last Audit Date
+    - Notes section for manual verification items
+  - lynis-report-warnings_fails.html: Filtered security report with warnings and suggestions
+    - Styled HTML report with only security issues
+    - Automatically extracted from Lynis audit
+    - Includes severity levels and recommendations
+    - Can be manually converted to PDF or viewed in browser
+  - lynis-report-warnings_fails.pdf: PDF version (if PDF converter available)
+    - Generated using wkhtmltopdf (in Docker) or weasyprint/pandoc (on host)
+    - Fallback to HTML if no converter available
   - neofetch.txt: System information
   - honeybadger-info.txt: Tool version info
   - blockdevices.txt: Storage configuration
@@ -124,22 +144,29 @@ The tool specifically targets ISO27001 compliance requirements for personal devi
 ### RUNME.sh Commands
 - **audit**: Run full security audit and generate report
   - Performs Lynis security audit
-  - Collects system information
-  - Generates multi-format reports
-  - Creates compressed tarball
+  - Collects system information (neofetch, packages, block devices, screen lock)
+  - Generates OS/kernel status report with PASS/FAIL verdict
+  - Generates asset inventory table
+  - Generates filtered warnings/suggestions report (HTML/PDF)
+  - Creates compressed tarball with all reports
 
-- **check-output** `<directory|tarball.tar.gz>`: Analyze OS/kernel status from existing output
+- **check-output** `<directory|tarball.tar.gz>`: Analyze OS/kernel status and generate asset inventory from existing output
   - Accepts output directory names (e.g., `output-user-09-02-2026`)
   - Accepts tar.gz files (e.g., `honeybadger-user-09-02-2026.tar.gz`)
   - Auto-detects and extracts tarballs when directory not found
   - Prompts before overwriting existing directories (accepts y/n/yes/no)
   - Automatically fetches latest release information
-  - Generates OS/kernel status report with PASS/FAIL conclusion
-  - Provides specific recommendations based on system status:
+  - Generates OS/kernel status report with PASS/FAIL conclusion:
     - **PASS**: System is current, continue regular updates
     - **WARNING**: System is older but supported, upgrade recommended
     - **FAIL**: System is EOL, immediate upgrade required with security warnings
     - **UNKNOWN**: Unable to determine status, manual verification needed
+  - Generates asset inventory table with:
+    - Hardware identification (hostname, model, serial number)
+    - OS and kernel versions
+    - Security features (disk encryption, screen lock, firewall, AV)
+    - Compliance status (OS up-to-date, Nix installation)
+    - Owner/user and audit date information
   - Auto-cleanup of extracted files
 
 - **fetch-releases** `[cache-dir]`: Update cached OS release information from APIs
