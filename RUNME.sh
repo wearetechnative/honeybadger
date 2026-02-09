@@ -94,27 +94,29 @@ audit(){
  tarball=honeybadger-$(whoami)-$(date +"%d-%m-%Y").tar.gz
  mkdir -p $output
 
- # Cleanup any existing container
- docker rm -f lynis_converter 2> /dev/null || true
-
  echo "Running Lynis audit..."
  sudo lynis audit system || { echo "ERROR: Lynis audit failed"; exit 1; }
 
  # Check if Docker image needs rebuild (if Dockerfile is newer than image)
  echo "Checking Docker image..."
- if ! docker image inspect wearetechnative/lynis-report-converter >/dev/null 2>&1 || [ Dockerfile -nt "$output" ]; then
-   echo "Building Docker image..."
-   docker build -t wearetechnative/lynis-report-converter . || { echo "ERROR: Docker build failed"; exit 1; }
+ local image_name="wearetechnative/lynis-report-converter:latest"
+
+ if ! docker image inspect "$image_name" >/dev/null 2>&1; then
+   echo "Building Docker image (first time)..."
+   docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
+ elif [ -f Dockerfile ] && [ Dockerfile -nt "$output" ]; then
+   echo "Dockerfile changed, rebuilding image..."
+   docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
  else
    echo "Using cached Docker image"
  fi
 
- # Use Docker volume mount instead of copying files
+ # Convert Lynis report using optimized container
  echo "Converting Lynis report to JSON..."
  docker run --rm \
-   -v /var/log/lynis-report.dat:/var/log/lynis-report.dat:ro \
-   wearetechnative/lynis-report-converter \
-   ./opt/lynis-report-converter-master/lynis-report-converter.pl -j > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
+   --read-only \
+   -v /var/log/lynis-report.dat:/data/lynis-report.dat:ro \
+   "$image_name" 2>/dev/null > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
  neofetch | perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' > $output/neofetch.txt
  command -v lsb_release >/dev/null && lsb_release -a > "$output/lsb_release.txt"
  show_version > $output/honeybadger-info.txt
@@ -371,6 +373,18 @@ audit(){
      echo "KDE settings not available"
    fi
  } > "$output/screenlock-info.txt"
+
+ # Generate OS and Kernel status report (includes EOL checking)
+ echo "Analyzing OS and kernel versions..."
+ if command -v jq >/dev/null 2>&1 && [[ -f "$output/lynis-report.json" ]]; then
+   # Fetch latest release information
+   fetch_os_releases .cache >/dev/null 2>&1 || echo "  Warning: Could not fetch latest release information"
+
+   # Run OS/kernel status check
+   check_os_status "$output" .cache || echo "  Warning: Could not complete OS/kernel analysis"
+ else
+   echo "  Skipping OS/kernel analysis (jq not available or lynis report missing)"
+ fi
 
  tar czf $tarball $output
 }
