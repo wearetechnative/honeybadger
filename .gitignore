@@ -1,4 +1,5 @@
-lynis-**.json
-output**
-honeybadger**bz2
-report
+.aider*
+**.tar**
+**.bz2
+output-*/
+.**sw*

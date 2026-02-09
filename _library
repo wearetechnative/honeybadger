@@ -1,0 +1,1012 @@
+#!/usr/bin/env bash
+#
+# os-status.sh - Library for OS and Kernel status checking
+#
+# This library provides functions to check OS and kernel status,
+# fetch release information, and validate system versions.
+#
+# Usage: source this file in your scripts
+#
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+CACHE_DIR="${HONEYBADGER_CACHE_DIR:-.cache}"
+CACHE_TTL=86400  # 24 hours
+
+# ==============================================================================
+# CACHE MANAGEMENT FUNCTIONS
+# ==============================================================================
+
+# Check if cache file is still valid
+# Usage: is_cache_valid <cache_file> [ttl_seconds]
+is_cache_valid() {
+    local cache_file="$1"
+    local ttl="${2:-$CACHE_TTL}"
+
+    if [[ ! -f "$cache_file" ]]; then
+        return 1
+    fi
+
+    local now=$(date +%s)
+    local mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null)
+    local age=$((now - mtime))
+
+    if [[ $age -lt $ttl ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Fetch data from URL
+# Usage: fetch_url <url> <output_file>
+fetch_url() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -s -f "$url" > "$output" 2>/dev/null
+        return $?
+    else
+        echo "ERROR: curl not found" >&2
+        return 1
+    fi
+}
+
+# ==============================================================================
+# RELEASE DATA FETCHING FUNCTIONS
+# ==============================================================================
+
+# Fetch all OS and kernel release information
+# Usage: fetch_os_releases [cache_dir]
+fetch_os_releases() {
+    local cache_dir="${1:-$CACHE_DIR}"
+    mkdir -p "$cache_dir"
+
+    echo "Fetching latest OS and kernel release information..."
+    echo "Cache directory: $cache_dir"
+    echo ""
+
+    # Fetch NixOS releases
+    if ! is_cache_valid "$cache_dir/nixos-releases.json" "$CACHE_TTL"; then
+        echo "Fetching NixOS releases from endoflife.date..."
+        if fetch_url "https://endoflife.date/api/nixos.json" "$cache_dir/nixos-releases.json"; then
+            echo "  ✓ NixOS releases cached"
+        else
+            echo "  ✗ Failed to fetch NixOS releases"
+        fi
+    else
+        echo "  → NixOS releases cache is still valid"
+    fi
+
+    # Fetch Ubuntu releases
+    if ! is_cache_valid "$cache_dir/ubuntu-releases.json" "$CACHE_TTL"; then
+        echo "Fetching Ubuntu releases from endoflife.date..."
+        if fetch_url "https://endoflife.date/api/ubuntu.json" "$cache_dir/ubuntu-releases.json"; then
+            echo "  ✓ Ubuntu releases cached"
+        else
+            echo "  ✗ Failed to fetch Ubuntu releases"
+        fi
+    else
+        echo "  → Ubuntu releases cache is still valid"
+    fi
+
+    # Fetch Debian releases
+    if ! is_cache_valid "$cache_dir/debian-releases.json" "$CACHE_TTL"; then
+        echo "Fetching Debian releases from endoflife.date..."
+        if fetch_url "https://endoflife.date/api/debian.json" "$cache_dir/debian-releases.json"; then
+            echo "  ✓ Debian releases cached"
+        else
+            echo "  ✗ Failed to fetch Debian releases"
+        fi
+    else
+        echo "  → Debian releases cache is still valid"
+    fi
+
+    # Fetch Linux kernel releases
+    if ! is_cache_valid "$cache_dir/kernel-releases.json" "$CACHE_TTL"; then
+        echo "Fetching Linux kernel releases from kernel.org..."
+        if fetch_url "https://www.kernel.org/releases.json" "$cache_dir/kernel-releases.json"; then
+            echo "  ✓ Kernel releases cached"
+        else
+            echo "  ✗ Failed to fetch kernel releases"
+        fi
+    else
+        echo "  → Kernel releases cache is still valid"
+    fi
+
+    echo ""
+    echo "Cache update complete!"
+}
+
+# ==============================================================================
+# NIXOS QUERY FUNCTIONS
+# ==============================================================================
+
+# Get latest NixOS release version
+# Usage: get_latest_nixos_release [cache_dir]
+get_latest_nixos_release() {
+    local cache_dir="${1:-$CACHE_DIR}"
+    if [[ -f "$cache_dir/nixos-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r '.[0].cycle' "$cache_dir/nixos-releases.json" 2>/dev/null
+    fi
+}
+
+# Get NixOS EOL date for a specific version
+# Usage: get_nixos_eol_date <version> [cache_dir]
+get_nixos_eol_date() {
+    local version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+    if [[ -f "$cache_dir/nixos-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r ".[] | select(.cycle == \"$version\") | .eol" "$cache_dir/nixos-releases.json" 2>/dev/null
+    fi
+}
+
+# Check if NixOS version is current/supported
+# Usage: check_nixos_is_current <version> [cache_dir]
+# Returns: "current", "previous", "supported", "eol", or "unknown"
+check_nixos_is_current() {
+    local version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ -f "$cache_dir/nixos-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        local latest=$(jq -r '.[0].cycle' "$cache_dir/nixos-releases.json" 2>/dev/null)
+        if [[ "$version" == "$latest" ]]; then
+            echo "current"
+        else
+            local second_latest=$(jq -r '.[1].cycle' "$cache_dir/nixos-releases.json" 2>/dev/null)
+            if [[ "$version" == "$second_latest" ]]; then
+                echo "previous"
+            else
+                # Check if EOL has passed
+                local eol=$(jq -r ".[] | select(.cycle == \"$version\") | .eol" "$cache_dir/nixos-releases.json" 2>/dev/null)
+                if [[ -n "$eol" ]]; then
+                    local eol_ts=$(date -d "$eol" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$eol" +%s 2>/dev/null)
+                    local now_ts=$(date +%s)
+                    if [[ $now_ts -gt $eol_ts ]]; then
+                        echo "eol"
+                    else
+                        echo "supported"
+                    fi
+                else
+                    echo "unknown"
+                fi
+            fi
+        fi
+    fi
+}
+
+# ==============================================================================
+# UBUNTU QUERY FUNCTIONS
+# ==============================================================================
+
+# Get latest Ubuntu LTS version
+# Usage: get_latest_ubuntu_lts [cache_dir]
+get_latest_ubuntu_lts() {
+    local cache_dir="${1:-$CACHE_DIR}"
+    if [[ -f "$cache_dir/ubuntu-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r '.[] | select(.lts == true) | .cycle' "$cache_dir/ubuntu-releases.json" 2>/dev/null | head -1
+    fi
+}
+
+# Check if Ubuntu version is current/supported
+# Usage: check_ubuntu_is_current <version> [cache_dir]
+# Returns: "current", "supported", "eol", or "unknown"
+check_ubuntu_is_current() {
+    local version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ -f "$cache_dir/ubuntu-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        local is_eol=$(jq -r ".[] | select(.cycle == \"$version\") | .eol" "$cache_dir/ubuntu-releases.json" 2>/dev/null)
+        if [[ -n "$is_eol" ]]; then
+            local eol_ts=$(date -d "$is_eol" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "$is_eol" +%s 2>/dev/null)
+            local now_ts=$(date +%s)
+            if [[ $now_ts -gt $eol_ts ]]; then
+                echo "eol"
+            else
+                local latest=$(jq -r '.[] | select(.lts == true) | .cycle' "$cache_dir/ubuntu-releases.json" 2>/dev/null | head -1)
+                if [[ "$version" == "$latest" ]]; then
+                    echo "current"
+                else
+                    echo "supported"
+                fi
+            fi
+        else
+            echo "unknown"
+        fi
+    fi
+}
+
+# ==============================================================================
+# KERNEL QUERY FUNCTIONS
+# ==============================================================================
+
+# Get kernel information
+# Usage: get_kernel_info <kernel_version> [cache_dir]
+get_kernel_info() {
+    local kernel_version="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ -f "$cache_dir/kernel-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r ".releases[] | select(.version | startswith(\"$kernel_version\")) | {version: .version, moniker: .moniker, iseol: .iseol}" "$cache_dir/kernel-releases.json" 2>/dev/null | head -1
+    fi
+}
+
+# ==============================================================================
+# OS INFORMATION EXTRACTION
+# ==============================================================================
+
+# Extract OS information from Honeybadger output directory
+# Usage: extract_os_info <output_dir>
+# Sets global variables: OS_NAME, OS_VERSION, OS_CODENAME, OS_FULLNAME, KERNEL_VERSION
+extract_os_info() {
+    local output_dir="$1"
+
+    # Initialize variables
+    OS_NAME=""
+    OS_VERSION=""
+    OS_CODENAME=""
+    OS_FULLNAME=""
+    KERNEL_VERSION=""
+
+    # Try to get info from lynis-report.json (most reliable)
+    if [[ -f "$output_dir/lynis-report.json" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            OS_NAME=$(jq -r '.os_name // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+            OS_VERSION=$(jq -r '.os_version // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+            OS_FULLNAME=$(jq -r '.os_fullname // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+            KERNEL_RAW=$(jq -r '.linux_kernel_version // empty' "$output_dir/lynis-report.json" 2>/dev/null)
+        fi
+    fi
+
+    # Fallback to neofetch.txt or fastfetch.txt
+    local fetch_file=""
+    if [[ -f "$output_dir/neofetch.txt" ]]; then
+        fetch_file="$output_dir/neofetch.txt"
+    elif [[ -f "$output_dir/fastfetch.txt" ]]; then
+        fetch_file="$output_dir/fastfetch.txt"
+    fi
+
+    if [[ -n "$fetch_file" ]]; then
+        # Get OS info if not already set
+        if [[ -z "$OS_NAME" ]]; then
+            local os_line=$(grep "^OS:" "$fetch_file" | head -1)
+            if [[ -n "$os_line" ]]; then
+                OS_FULLNAME=$(echo "$os_line" | sed 's/^OS: //')
+
+                # Handle different formats
+                if [[ "$OS_FULLNAME" =~ "Kali" ]]; then
+                    OS_NAME="Kali"
+                    OS_VERSION=$(echo "$OS_FULLNAME" | grep -oP 'Rolling|\d+\.\d+' | head -1)
+                else
+                    OS_NAME=$(echo "$OS_FULLNAME" | awk '{print $1}')
+                    OS_VERSION=$(echo "$OS_FULLNAME" | awk '{print $2}' | cut -d. -f1-2)
+                fi
+                OS_CODENAME=$(echo "$OS_FULLNAME" | grep -oP '\(\K[^)]+' || echo "")
+            fi
+        fi
+
+        # Always try to get kernel from fetch file
+        if [[ -z "$KERNEL_VERSION" ]]; then
+            local kernel_line=$(grep "^Kernel:" "$fetch_file" | head -1)
+            if [[ -n "$kernel_line" ]]; then
+                KERNEL_VERSION=$(echo "$kernel_line" | grep -oP '\d+\.\d+\.\d+' | head -1)
+            fi
+        fi
+    fi
+
+    # Fallback to lsb_release.txt
+    if [[ -z "$OS_NAME" && -f "$output_dir/lsb_release.txt" ]]; then
+        OS_NAME=$(grep "^Distributor ID:" "$output_dir/lsb_release.txt" | cut -d: -f2- | xargs)
+        OS_VERSION=$(grep "^Release:" "$output_dir/lsb_release.txt" | cut -d: -f2- | xargs)
+        OS_CODENAME=$(grep "^Codename:" "$output_dir/lsb_release.txt" | cut -d: -f2- | xargs)
+    fi
+
+    # Export variables for use in calling script
+    export OS_NAME OS_VERSION OS_CODENAME OS_FULLNAME KERNEL_VERSION
+}
+
+# ==============================================================================
+# OS STATUS CHECKING
+# ==============================================================================
+
+# Check OS status and generate report
+# Usage: check_os_status <output_dir> [cache_dir]
+check_os_status() {
+    local output_dir="$1"
+    local cache_dir="${2:-$CACHE_DIR}"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Directory $output_dir does not exist"
+        return 1
+    fi
+
+    # Fetch latest release info if needed
+    if [[ ! -d "$cache_dir" ]] || [[ ! -f "$cache_dir/nixos-releases.json" ]]; then
+        fetch_os_releases "$cache_dir" >/dev/null 2>&1
+    fi
+
+    # Extract OS information
+    extract_os_info "$output_dir"
+
+    if [[ -z "$OS_NAME" ]]; then
+        echo "ERROR: Unable to extract OS information from output files"
+        return 1
+    fi
+
+    # Generate report
+    local report_file="$output_dir/os-kernel-status.txt"
+
+    echo "=====================================" > "$report_file"
+    echo "  OS & KERNEL STATUS ANALYSIS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "Analysis Date: $(date)" >> "$report_file"
+    echo "Source: $output_dir" >> "$report_file"
+    echo "" >> "$report_file"
+
+    echo "=====================================" >> "$report_file"
+    echo "SECTION 1: OPERATING SYSTEM STATUS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+
+    echo "Detected OS: $OS_NAME" >> "$report_file"
+    echo "Version: $OS_VERSION" >> "$report_file"
+    [[ -n "$OS_CODENAME" ]] && echo "Codename: $OS_CODENAME" >> "$report_file"
+    [[ -n "$OS_FULLNAME" ]] && echo "Full Name: $OS_FULLNAME" >> "$report_file"
+    echo "" >> "$report_file"
+
+    # Variable to track overall status
+    local os_status_result="unknown"
+
+    # Analyze based on OS type
+    case "$OS_NAME" in
+        NixOS)
+            os_status_result=$(analyze_nixos_status "$report_file" "$cache_dir")
+            ;;
+        Ubuntu)
+            os_status_result=$(analyze_ubuntu_status "$report_file" "$cache_dir")
+            ;;
+        Debian)
+            os_status_result=$(analyze_debian_status "$report_file" "$cache_dir")
+            ;;
+        Arch|"Arch Linux")
+            os_status_result=$(analyze_arch_status "$report_file")
+            ;;
+        Kali|"Kali Linux")
+            os_status_result=$(analyze_kali_status "$report_file")
+            ;;
+        *)
+            echo "Distribution: $OS_NAME (Unknown/Unsupported)" >> "$report_file"
+            echo "Status: UNABLE TO DETERMINE" >> "$report_file"
+            os_status_result="unknown"
+            ;;
+    esac
+
+    # Analyze kernel
+    if [[ -n "$KERNEL_VERSION" ]]; then
+        analyze_kernel_status "$report_file" "$cache_dir"
+    fi
+
+    # Generate summary with status and recommendations
+    generate_status_summary "$report_file" "$os_status_result" "$cache_dir"
+
+    # Print report
+    cat "$report_file"
+}
+
+# Analyze NixOS status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
+analyze_nixos_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "Distribution: NixOS (Rolling/Stable)" >> "$report_file"
+    echo "" >> "$report_file"
+
+    local nixos_status=$(check_nixos_is_current "$OS_VERSION" "$cache_dir")
+    local nixos_eol=$(get_nixos_eol_date "$OS_VERSION" "$cache_dir")
+    local latest_nixos=$(get_latest_nixos_release "$cache_dir")
+    local result="unknown"
+
+    echo "1. IS CURRENT OS VERSION AN ACTIVE UPDATE STREAM?" >> "$report_file"
+    echo "---------------------------------------------------" >> "$report_file"
+
+    case "$nixos_status" in
+        current)
+            echo "Status: YES - CURRENT STABLE RELEASE" >> "$report_file"
+            echo "Update Stream: ACTIVE" >> "$report_file"
+            result="pass"
+            ;;
+        previous|supported)
+            if [[ "$nixos_status" == "previous" ]]; then
+                echo "Status: YES - PREVIOUS STABLE (still supported)" >> "$report_file"
+            else
+                echo "Status: YES - OLDER VERSION (still receiving updates)" >> "$report_file"
+            fi
+            echo "Update Stream: ACTIVE (but upgrade recommended)" >> "$report_file"
+            [[ -n "$nixos_eol" ]] && echo "Support until: $nixos_eol" >> "$report_file"
+            [[ -n "$latest_nixos" ]] && echo "Recommendation: Upgrade to $latest_nixos" >> "$report_file"
+            result="warning"
+            ;;
+        eol)
+            echo "Status: NO - END OF LIFE" >> "$report_file"
+            echo "Update Stream: INACTIVE (no longer receives updates)" >> "$report_file"
+            [[ -n "$nixos_eol" ]] && echo "EOL Date: $nixos_eol" >> "$report_file"
+            [[ -n "$latest_nixos" ]] && echo "CRITICAL: Upgrade to NixOS $latest_nixos immediately" >> "$report_file"
+            result="fail"
+            ;;
+        *)
+            echo "Status: UNKNOWN VERSION" >> "$report_file"
+            echo "Update Stream: UNABLE TO DETERMINE" >> "$report_file"
+            result="unknown"
+            ;;
+    esac
+
+    echo "" >> "$report_file"
+    echo "$result"
+}
+
+# Analyze Ubuntu status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
+analyze_ubuntu_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "Distribution: Ubuntu Linux" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "1. IS CURRENT OS VERSION AN ACTIVE UPDATE STREAM?" >> "$report_file"
+    echo "---------------------------------------------------" >> "$report_file"
+
+    local ubuntu_status=$(check_ubuntu_is_current "$OS_VERSION" "$cache_dir")
+    local latest_ubuntu=$(get_latest_ubuntu_lts "$cache_dir")
+    local result="unknown"
+
+    case "$ubuntu_status" in
+        current)
+            echo "Status: YES - CURRENT LTS" >> "$report_file"
+            echo "Update Stream: ACTIVE" >> "$report_file"
+            result="pass"
+            ;;
+        supported)
+            echo "Status: YES - OLDER LTS (still receiving updates)" >> "$report_file"
+            echo "Update Stream: ACTIVE (but upgrade recommended)" >> "$report_file"
+            [[ -n "$latest_ubuntu" ]] && echo "Recommendation: Upgrade to Ubuntu $latest_ubuntu LTS" >> "$report_file"
+            result="warning"
+            ;;
+        eol)
+            echo "Status: NO - END OF LIFE" >> "$report_file"
+            echo "Update Stream: INACTIVE (no longer receives updates)" >> "$report_file"
+            [[ -n "$latest_ubuntu" ]] && echo "CRITICAL: Upgrade to Ubuntu $latest_ubuntu LTS immediately" >> "$report_file"
+            result="fail"
+            ;;
+        *)
+            echo "Status: UNKNOWN VERSION" >> "$report_file"
+            result="unknown"
+            ;;
+    esac
+
+    echo "" >> "$report_file"
+    echo "$result"
+}
+
+# Analyze Debian status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
+analyze_debian_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "Distribution: Debian GNU/Linux" >> "$report_file"
+    echo "Version: $OS_VERSION" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "pass"
+}
+
+# Analyze Arch status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
+analyze_arch_status() {
+    local report_file="$1"
+
+    echo "Distribution: Arch Linux (Rolling Release)" >> "$report_file"
+    echo "Status: YES - ALWAYS CURRENT (if regularly updated)" >> "$report_file"
+    echo "Update Stream: ROLLING RELEASE (no versions)" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "pass"
+}
+
+# Analyze Kali status (helper function)
+# Returns: "pass", "warning", "fail", or "unknown"
+analyze_kali_status() {
+    local report_file="$1"
+
+    echo "Distribution: Kali Linux (Debian-based, Rolling)" >> "$report_file"
+    echo "Status: YES - ROLLING RELEASE" >> "$report_file"
+    echo "Update Stream: ACTIVE" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "pass"
+}
+
+# Analyze kernel status (helper function)
+analyze_kernel_status() {
+    local report_file="$1"
+    local cache_dir="$2"
+
+    echo "=====================================" >> "$report_file"
+    echo "SECTION 2: KERNEL VERSION STATUS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "Detected Kernel: $KERNEL_VERSION" >> "$report_file"
+    echo "" >> "$report_file"
+}
+
+# Generate status summary (helper function)
+generate_status_summary() {
+    local report_file="$1"
+    local os_status="$2"
+    local cache_dir="$3"
+
+    echo "" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "OVERALL SYSTEM STATUS" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+
+    # Determine overall status
+    case "$os_status" in
+        pass)
+            echo "Result: ✓ PASS" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Your system is running a supported operating system version" >> "$report_file"
+            echo "with an active update stream. No immediate action required." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Recommendations:" >> "$report_file"
+            echo "  - Continue applying regular system updates" >> "$report_file"
+            echo "  - Monitor for new releases and security updates" >> "$report_file"
+            echo "  - Review this report periodically (at least quarterly)" >> "$report_file"
+            ;;
+        warning)
+            echo "Result: ⚠ WARNING" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Your system is NOT running the latest version but STILL RECEIVES UPDATES." >> "$report_file"
+            echo "An upgrade is recommended but not critical." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Recommendations:" >> "$report_file"
+            echo "  - Plan an upgrade to the latest stable release" >> "$report_file"
+            echo "  - Continue applying security updates in the meantime" >> "$report_file"
+            echo "  - Review the upgrade path and test in a staging environment" >> "$report_file"
+
+            # Add specific upgrade recommendation if available
+            local latest_release=""
+            case "$OS_NAME" in
+                NixOS)
+                    latest_release=$(get_latest_nixos_release "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  - Target version: NixOS $latest_release" >> "$report_file"
+                    ;;
+                Ubuntu)
+                    latest_release=$(get_latest_ubuntu_lts "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  - Target version: Ubuntu $latest_release LTS" >> "$report_file"
+                    ;;
+            esac
+            ;;
+        fail)
+            echo "Result: ✗ FAIL" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "CRITICAL: Your system NO LONGER RECEIVES UPDATES (End-of-Life)." >> "$report_file"
+            echo "This version has reached EOL and no longer receives security updates." >> "$report_file"
+            echo "This poses a significant security risk." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "URGENT Actions Required:" >> "$report_file"
+            echo "  1. DO NOT connect this system to untrusted networks" >> "$report_file"
+            echo "  2. Plan an immediate upgrade to a supported version" >> "$report_file"
+            echo "  3. If upgrade is not immediately possible:" >> "$report_file"
+            echo "     - Isolate the system from the internet" >> "$report_file"
+            echo "     - Restrict network access to essential services only" >> "$report_file"
+            echo "     - Increase monitoring and auditing" >> "$report_file"
+            echo "  4. Document the security risk and create an upgrade timeline" >> "$report_file"
+
+            # Add specific upgrade recommendation if available
+            local latest_release=""
+            case "$OS_NAME" in
+                NixOS)
+                    latest_release=$(get_latest_nixos_release "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  5. Upgrade to: NixOS $latest_release" >> "$report_file"
+                    ;;
+                Ubuntu)
+                    latest_release=$(get_latest_ubuntu_lts "$cache_dir")
+                    [[ -n "$latest_release" ]] && echo "  5. Upgrade to: Ubuntu $latest_release LTS" >> "$report_file"
+                    ;;
+            esac
+
+            echo "" >> "$report_file"
+            echo "ISO27001 Compliance Note:" >> "$report_file"
+            echo "Running EOL software may violate security policies and compliance" >> "$report_file"
+            echo "requirements. Document this finding and escalate appropriately." >> "$report_file"
+            ;;
+        *)
+            echo "Result: ? UNKNOWN" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Unable to determine system status. This may be due to:" >> "$report_file"
+            echo "  - Unsupported or unrecognized operating system" >> "$report_file"
+            echo "  - Missing or incomplete system information" >> "$report_file"
+            echo "  - Unable to fetch release data from external sources" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "Recommendations:" >> "$report_file"
+            echo "  - Verify system information is correctly reported" >> "$report_file"
+            echo "  - Check internet connectivity for release data updates" >> "$report_file"
+            echo "  - Manually verify OS version support status" >> "$report_file"
+            echo "  - Consult your OS vendor's support lifecycle documentation" >> "$report_file"
+            ;;
+    esac
+
+    echo "" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "END OF REPORT" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+}
+
+# ==============================================================================
+# ASSET INVENTORY FUNCTIONS
+# ==============================================================================
+
+# Generate asset inventory table from available data
+# Usage: generate_asset_inventory <output_dir>
+generate_asset_inventory() {
+    local output_dir="$1"
+    local report_file="$output_dir/asset-inventory.txt"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Directory $output_dir does not exist"
+        return 1
+    fi
+
+    # Extract data from available files
+    local hostname=""
+    local os_full=""
+    local os_version=""
+    local kernel=""
+    local model=""
+    local serial=""
+    local disk_encrypted="Unknown"
+    local screen_lock="Unknown"
+    local nix_installed="Unknown"
+    local malware_scanner="Unknown"
+    local firewall_active="Unknown"
+    local os_uptodate="Unknown"
+    local owner=""
+    local report_date=""
+
+    # Get hostname and OS info from lynis-report.json
+    if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
+        hostname=$(jq -r '.hostname // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        os_version=$(jq -r '.os_version // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        malware_scanner=$(jq -r '.malware_scanner_installed // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
+        [[ "$malware_scanner" == "1" ]] && malware_scanner="Yes" || malware_scanner="No"
+        firewall_active=$(jq -r '.firewall_active // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
+        [[ "$firewall_active" == "1" ]] && firewall_active="Yes" || firewall_active="No"
+    fi
+
+    # Get hardware info from neofetch.txt
+    if [[ -f "$output_dir/neofetch.txt" ]]; then
+        owner=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f1 | head -1)
+        model=$(grep "^Host:" "$output_dir/neofetch.txt" | sed 's/^Host: //' | head -1)
+
+        # Get kernel version from neofetch (more reliable than lynis)
+        kernel=$(grep "^Kernel:" "$output_dir/neofetch.txt" | sed 's/^Kernel: //' | head -1)
+
+        # If hostname not found in lynis, get from neofetch
+        if [[ "$hostname" == "Unknown" ]]; then
+            hostname=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f2 | awk '{print $1}' | head -1)
+        fi
+    fi
+
+    # Check for disk encryption from blockdevices.txt
+    if [[ -f "$output_dir/blockdevices.txt" ]]; then
+        if grep -q "crypto_LUKS" "$output_dir/blockdevices.txt"; then
+            disk_encrypted="Yes (LUKS)"
+        else
+            disk_encrypted="No"
+        fi
+    fi
+
+    # Check screen lock from screenlock-info.txt
+    if [[ -f "$output_dir/screenlock-info.txt" ]]; then
+        if grep -q "AUTO-LOCK-STATUS: ENABLED" "$output_dir/screenlock-info.txt"; then
+            screen_lock="Yes (Auto-lock enabled)"
+            # Extract the human-readable part (e.g., "10 minutes")
+            local lock_time=$(grep "Total time until auto-lock:" "$output_dir/screenlock-info.txt" | grep -oP '\([0-9]+ [a-z]+\)' | tr -d '()')
+            [[ -n "$lock_time" ]] && screen_lock="Yes (Auto-lock: $lock_time)"
+        else
+            screen_lock="Not detected / Disabled"
+        fi
+    fi
+
+    # Check for Nix installation
+    if [[ "$os_full" =~ "NixOS" ]]; then
+        nix_installed="Yes (NixOS)"
+    elif [[ -f "$output_dir/neofetch.txt" ]] && grep -q "nix-" "$output_dir/neofetch.txt"; then
+        nix_installed="Yes"
+    elif [[ -f "$output_dir/installed-packages.txt" ]] && grep -qi "nix" "$output_dir/installed-packages.txt"; then
+        nix_installed="Yes"
+    else
+        nix_installed="No"
+    fi
+
+    # Check OS up-to-date status from os-kernel-status.txt
+    if [[ -f "$output_dir/os-kernel-status.txt" ]]; then
+        if grep -q "Result: ✓ PASS" "$output_dir/os-kernel-status.txt"; then
+            os_uptodate="Yes (Current)"
+        elif grep -q "Result: ⚠ WARNING" "$output_dir/os-kernel-status.txt"; then
+            os_uptodate="Supported (Upgrade recommended)"
+        elif grep -q "Result: ✗ FAIL" "$output_dir/os-kernel-status.txt"; then
+            os_uptodate="No (EOL)"
+        else
+            os_uptodate="Unknown"
+        fi
+    fi
+
+    # Get report date from directory name or file timestamp
+    if [[ "$output_dir" =~ ([0-9]{2}-[0-9]{2}-[0-9]{4}) ]]; then
+        report_date="${BASH_REMATCH[1]}"
+    elif [[ -f "$output_dir/lynis-report.json" ]]; then
+        report_date=$(date -r "$output_dir/lynis-report.json" +"%d-%m-%Y" 2>/dev/null)
+    fi
+
+    # Generate report
+    echo "=====================================" > "$report_file"
+    echo "  ASSET INVENTORY" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "" >> "$report_file"
+    echo "This table contains asset information extracted from the audit report." >> "$report_file"
+    echo "" >> "$report_file"
+
+    # Create table
+    printf "%-35s | %s\n" "Field" "Value" >> "$report_file"
+    printf "%-35s-+-" "-----------------------------------" >> "$report_file"
+    printf "%s\n" "----------------------------------------" >> "$report_file"
+    printf "%-35s | %s\n" "Hostname (Asset ID)" "$hostname" >> "$report_file"
+    printf "%-35s | %s\n" "Serial Number / Model" "$model" >> "$report_file"
+    printf "%-35s | %s\n" "Description" "Personal Device" >> "$report_file"
+    printf "%-35s | %s\n" "OS Edition + Version" "$os_full" >> "$report_file"
+    printf "%-35s | %s\n" "Kernel Version" "$kernel" >> "$report_file"
+    printf "%-35s | %s\n" "Nix Installed" "$nix_installed" >> "$report_file"
+    printf "%-35s | %s\n" "Disk Encryption" "$disk_encrypted" >> "$report_file"
+    printf "%-35s | %s\n" "Screen Lock" "$screen_lock" >> "$report_file"
+    printf "%-35s | %s\n" "Malware Scanner" "$malware_scanner" >> "$report_file"
+    printf "%-35s | %s\n" "Firewall Active" "$firewall_active" >> "$report_file"
+    printf "%-35s | %s\n" "OS Up-to-date" "$os_uptodate" >> "$report_file"
+    printf "%-35s | %s\n" "Owner / User" "$owner" >> "$report_file"
+    printf "%-35s | %s\n" "Last Audit Date" "$report_date" >> "$report_file"
+
+    echo "" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+    echo "Notes:" >> "$report_file"
+    echo "  - Serial number may require manual verification" >> "$report_file"
+    echo "  - 'No suspicious software detected' requires manual review of:" >> "$report_file"
+    echo "    * installed-packages.txt" >> "$report_file"
+    echo "    * lynis-report.json security warnings" >> "$report_file"
+    echo "  - Defender (AV) status: See 'Malware Scanner' field" >> "$report_file"
+    echo "=====================================" >> "$report_file"
+
+    cat "$report_file"
+    return 0
+}
+
+# ==============================================================================
+# WARNINGS/SUGGESTIONS REPORT GENERATION
+# ==============================================================================
+
+# Generate warnings and suggestions HTML/PDF report
+# Usage: generate_warnings_report <lynis_json> <output_base>
+# Output: Creates ${output_base}.html and optionally ${output_base}.pdf
+generate_warnings_report() {
+    local input_json="$1"
+    local output_base="$2"
+    local output_html="${output_base}.html"
+    local output_pdf="${output_base}.pdf"
+    local temp_html="/tmp/lynis-warnings-$$.html"
+
+    if [[ ! -f "$input_json" ]]; then
+        echo "ERROR: Input file $input_json does not exist"
+        return 1
+    fi
+
+    # Check jq dependency
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: jq is required for warnings report generation"
+        return 1
+    fi
+
+    # Extract data from JSON
+    local hostname=$(jq -r '.hostname // "Unknown"' "$input_json" 2>/dev/null)
+    local os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$input_json" 2>/dev/null)
+    local report_date=$(jq -r '.report_datetime_start // "Unknown"' "$input_json" 2>/dev/null)
+    local lynis_version=$(jq -r '.lynis_version // "Unknown"' "$input_json" 2>/dev/null)
+    local warning_count=$(jq -r '.["warning[]"] | length' "$input_json" 2>/dev/null)
+    local suggestion_count=$(jq -r '.["suggestion[]"] | length' "$input_json" 2>/dev/null)
+
+    # Generate HTML
+    cat > "$temp_html" <<'HTML_HEADER'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Lynis Security Audit - Warnings and Suggestions</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #e74c3c;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #95a5a6;
+            padding-bottom: 5px;
+            margin-top: 30px;
+        }
+        .header-info {
+            background-color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+        .header-info p {
+            margin: 5px 0;
+        }
+        .summary {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .warning {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        .warning-id {
+            font-weight: bold;
+            color: #721c24;
+        }
+        .suggestion {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        .suggestion-id {
+            font-weight: bold;
+            color: #0c5460;
+        }
+        .severity {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .severity-high { background-color: #dc3545; color: white; }
+        .severity-medium { background-color: #ffc107; color: #333; }
+        .severity-low { background-color: #28a745; color: white; }
+        .no-issues {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            color: #155724;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ccc;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Lynis Security Audit Report</h1>
+    <h2>Warnings and Suggestions</h2>
+
+    <div class="header-info">
+HTML_HEADER
+
+    # Add header information
+    cat >> "$temp_html" <<EOF
+        <p><strong>Hostname:</strong> $hostname</p>
+        <p><strong>Operating System:</strong> $os_full</p>
+        <p><strong>Report Date:</strong> $report_date</p>
+        <p><strong>Lynis Version:</strong> $lynis_version</p>
+    </div>
+
+    <div class="summary">
+        <p><strong>Summary:</strong></p>
+        <p>⚠️  Warnings: $warning_count</p>
+        <p>💡 Suggestions: $suggestion_count</p>
+    </div>
+EOF
+
+    # Add warnings section
+    cat >> "$temp_html" <<'WARNINGS_HEADER'
+    <h2>⚠️  Warnings</h2>
+WARNINGS_HEADER
+
+    if [[ "$warning_count" -gt 0 ]]; then
+        jq -r '.["warning[]"] | to_entries | .[] |
+            "<div class=\"warning\">" +
+            "<span class=\"warning-id\">WARNING:</span> " +
+            (.value | tostring) +
+            "</div>"' "$input_json" >> "$temp_html" 2>/dev/null
+    else
+        echo '<div class="no-issues">✓ No warnings found. Great job!</div>' >> "$temp_html"
+    fi
+
+    # Add suggestions section
+    cat >> "$temp_html" <<'SUGGESTIONS_HEADER'
+    <h2>💡 Suggestions</h2>
+SUGGESTIONS_HEADER
+
+    if [[ "$suggestion_count" -gt 0 ]]; then
+        jq -r '.["suggestion[]"] | .[] |
+            "<div class=\"suggestion\">" +
+            "<span class=\"suggestion-id\">" + .id + "</span>" +
+            (if .severity and .severity != "NA" and .severity != null then
+                " <span class=\"severity severity-" + (.severity | ascii_downcase) + "\">" + .severity + "</span>"
+            else "" end) +
+            "<p>" + .description + "</p>" +
+            "</div>"' "$input_json" >> "$temp_html" 2>/dev/null
+    else
+        echo '<div class="no-issues">✓ No suggestions. System is well configured!</div>' >> "$temp_html"
+    fi
+
+    # Add footer
+    cat >> "$temp_html" <<'HTML_FOOTER'
+    <div class="footer">
+        <p>Generated by Honeybadger - Personal Device Audit Tool</p>
+        <p>🦡 Make your computer as tough as a honeybadger</p>
+        <p><a href="https://github.com/wearetechnative/personal-device-audit">github.com/wearetechnative/personal-device-audit</a></p>
+    </div>
+</body>
+</html>
+HTML_FOOTER
+
+    # Always save HTML
+    cp "$temp_html" "$output_html"
+    echo "✓ HTML report generated: $output_html"
+
+    # Try to convert HTML to PDF using Docker container with wkhtmltopdf
+    echo "Converting HTML to PDF using Docker..."
+    local html_dir=$(dirname "$output_html")
+    local html_filename=$(basename "$output_html")
+    local pdf_filename=$(basename "$output_pdf")
+
+    docker run --rm \
+        -v "$html_dir:/data:rw" \
+        --entrypoint /usr/local/bin/wkhtmltopdf \
+        wearetechnative/lynis-report-converter:latest \
+        --quiet --enable-local-file-access \
+        "/data/$html_filename" "/data/$pdf_filename" >/dev/null 2>&1
+
+    # Check if PDF was successfully created
+    if [[ -f "$output_pdf" ]]; then
+        # Fix ownership (Docker runs as root, so PDF is owned by root)
+        chmod 644 "$output_pdf" 2>/dev/null || true
+        chown --reference="$output_html" "$output_pdf" 2>/dev/null || true
+        echo "✓ PDF report generated: $output_pdf"
+    else
+        echo "⚠ PDF conversion failed, HTML version available at: $output_html"
+    fi
+
+    # Cleanup
+    rm -f "$temp_html"
+    return 0
+}

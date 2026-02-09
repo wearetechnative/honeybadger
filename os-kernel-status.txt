@@ -1,0 +1,7 @@
+=====================================
+  OS & KERNEL STATUS ANALYSIS
+=====================================
+Analysis Date: Mon Feb  9 08:40:59 AM CET 2026
+Source: .
+
+ERROR: Unable to extract OS information from output files
