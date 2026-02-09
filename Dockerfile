@@ -24,7 +24,7 @@ RUN cpanm --notest \
     Excel::Writer::XLSX
 
 # Install lynis-report-converter from GitHub (latest)
-RUN wget https://github.com/d4t4king/lynis-report-converter/archive/refs/heads/master.zip -P /tmp/lynis-converter-dist \
+RUN wget https://github.com/wearetechnative/lynis-report-converter/archive/refs/heads/master.zip -P /tmp/lynis-converter-dist \
     && unzip /tmp/lynis-converter-dist/master.zip -d /opt \
     && cd /opt/lynis-report-converter-master/ \
     && perl Makefile.PL \

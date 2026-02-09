@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 #(C)2019-2022 Pim Snel - https://github.com/mipmip/RUNME.sh
-CMDS=();DESC=();NARGS=$#;ARG1=$1;make_command(){ CMDS+=($1);DESC+=("$2");};usage(){ printf "\nUsage: %s [command]\n\nCommands:\n" $0;line="              ";for((i=0;i<=$(( ${#CMDS[*]} -1));i++));do printf "  %s %s ${DESC[$i]}\n" ${CMDS[$i]} "${line:${#CMDS[$i]}}";done;echo;};runme(){ if test $NARGS -eq 1;then eval "$ARG1"||usage;else usage;fi;}
+CMDS=();DESC=();NARGS=$#;ARG1=$1;shift;ARGS="$@";make_command(){ CMDS+=($1);DESC+=("$2");};usage(){ printf "\nUsage: %s [command]\n\nCommands:\n" $0;line="              ";for((i=0;i<=$(( ${#CMDS[*]} -1));i++));do printf "  %s %s ${DESC[$i]}\n" ${CMDS[$i]} "${line:${#CMDS[$i]}}";done;echo;};runme(){ if test $NARGS -ge 1;then eval "$ARG1 $ARGS"||usage;else usage;fi;}
+
+##### LOAD LIBRARIES #####
+
+thisdir="$(dirname "$0")"
+
+# Load library file
+if [[ -f "$thisdir/_library" ]]; then
+    source "$thisdir/_library"
+fi
 
 ##### PLACE YOUR COMMANDS BELOW #####
 
 MISSING_DEPS=()
-thisdir="$(dirname "$0")"
 
 function show_version(){
   version=`cat $thisdir/VERSION-honeybadger`
@@ -70,6 +78,7 @@ function checkBlockDevices {
 
 make_command "audit" "Run Audit Tool to create report"
 audit(){
+ set -e  # Exit on error
 
  show_version
  checkOS
@@ -82,19 +91,30 @@ audit(){
  deps_missing
 
  output=output-$(whoami)-$(date +"%d-%m-%Y")
- tarball=honeybadger-$(whoami)-$(date +"%d-%m-%Y").tar.bz2
+ tarball=honeybadger-$(whoami)-$(date +"%d-%m-%Y").tar.gz
  mkdir -p $output
- docker rm lynis_converter 2> /dev/null
- sudo lynis audit system
- docker build -t kuznetsovv/lynis-report-converter .
- docker run -d --name lynis_converter kuznetsovv/lynis-report-converter
- sudo cp /var/log/lynis-report.dat /tmp
- sudo chmod 666 /tmp/lynis-report.dat
- docker cp /tmp/lynis-report.dat lynis_converter:/var/log/lynis-report.dat
- docker exec lynis_converter ./opt/lynis-report-converter-master/lynis-report-converter.pl -j > $output/lynis-report.json
- docker stop lynis_converter
- docker rm lynis_converter
- sudo rm /tmp/lynis-report.dat
+
+ # Cleanup any existing container
+ docker rm -f lynis_converter 2> /dev/null || true
+
+ echo "Running Lynis audit..."
+ sudo lynis audit system || { echo "ERROR: Lynis audit failed"; exit 1; }
+
+ # Check if Docker image needs rebuild (if Dockerfile is newer than image)
+ echo "Checking Docker image..."
+ if ! docker image inspect wearetechnative/lynis-report-converter >/dev/null 2>&1 || [ Dockerfile -nt "$output" ]; then
+   echo "Building Docker image..."
+   docker build -t wearetechnative/lynis-report-converter . || { echo "ERROR: Docker build failed"; exit 1; }
+ else
+   echo "Using cached Docker image"
+ fi
+
+ # Use Docker volume mount instead of copying files
+ echo "Converting Lynis report to JSON..."
+ docker run --rm \
+   -v /var/log/lynis-report.dat:/var/log/lynis-report.dat:ro \
+   wearetechnative/lynis-report-converter \
+   ./opt/lynis-report-converter-master/lynis-report-converter.pl -j > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
  neofetch | perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' > $output/neofetch.txt
  command -v lsb_release >/dev/null && lsb_release -a > "$output/lsb_release.txt"
  show_version > $output/honeybadger-info.txt
@@ -352,7 +372,119 @@ audit(){
    fi
  } > "$output/screenlock-info.txt"
 
- tar cjvf $tarball $output
+ tar czf $tarball $output
+}
+
+make_command "check-output" "Check OS and kernel status from existing output"
+check-output(){
+ if [[ -z "$1" ]]; then
+   echo "Usage: ./RUNME.sh check-output <output-directory|tarball.tar.gz>"
+   echo "Example: ./RUNME.sh check-output output-wtoorren-09-02-2026"
+   echo "Example: ./RUNME.sh check-output honeybadger-wtoorren-09-02-2026.tar.gz"
+   exit 1
+ fi
+
+ local input="$1"
+ local output_dir=""
+ local cleanup_extracted=false
+
+ # Helper function to extract tarball
+ extract_tarball() {
+   local tarball="$1"
+   local target_dir=$(tar tzf "$tarball" | head -1 | cut -f1 -d"/")
+
+   # Check if target directory already exists
+   if [[ -d "$target_dir" ]]; then
+     echo "WARNING: Directory '$target_dir' already exists."
+     echo -n "Do you want to overwrite it? (y/n): "
+     read answer
+
+     if [[ "$answer" != "yes" && "$answer" != "y" && "$answer" != "Y" ]]; then
+       echo "Aborted. Using existing directory instead."
+       output_dir="$target_dir"
+       cleanup_extracted=false
+       return 0
+     fi
+
+     echo "Removing existing directory..."
+     rm -rf "$target_dir"
+   fi
+
+   echo "Extracting..."
+   tar xzf "$tarball" || { echo "ERROR: Failed to extract $tarball"; exit 1; }
+
+   if [[ ! -d "$target_dir" ]]; then
+     echo "ERROR: Could not find extracted directory"
+     exit 1
+   fi
+
+   echo "Extracted to: $target_dir"
+   output_dir="$target_dir"
+   cleanup_extracted=true
+ }
+
+ # Check if input is a directory
+ if [[ -d "$input" ]]; then
+   output_dir="$input"
+   echo "Using existing directory: $output_dir"
+
+ # Check if input is a tar.gz file
+ elif [[ -f "$input" && "$input" == *.tar.gz ]]; then
+   echo "Found tar.gz file: $input"
+   extract_tarball "$input"
+
+ # If input doesn't exist as directory, try to find corresponding tar.gz
+ else
+   # Try to find tar.gz with similar name
+   local tarball=""
+
+   # If input looks like a directory name, try to find matching tar.gz
+   if [[ "$input" =~ ^output- ]]; then
+     # Convert output-user-date to honeybadger-user-date.tar.gz
+     local basename="${input#output-}"
+     tarball="honeybadger-${basename}.tar.gz"
+   elif [[ "$input" =~ ^honeybadger- ]]; then
+     tarball="$input"
+     # Add .tar.gz if not present
+     [[ "$tarball" != *.tar.gz ]] && tarball="${tarball}.tar.gz"
+   else
+     # Just try adding .tar.gz
+     tarball="${input}.tar.gz"
+   fi
+
+   if [[ -f "$tarball" ]]; then
+     echo "Directory not found, but found tar.gz: $tarball"
+     extract_tarball "$tarball"
+   else
+     echo "ERROR: Could not find directory '$input' or tar.gz file '$tarball'"
+     exit 1
+   fi
+ fi
+
+ # Fetch latest release information if cache doesn't exist or is old
+ echo ""
+ echo "Checking for latest release information..."
+ fetch_os_releases .cache
+ echo ""
+
+ # Run the check
+ check_os_status "$output_dir"
+
+ local exit_code=$?
+
+ # Cleanup extracted directory if we created it
+ if [[ "$cleanup_extracted" == true ]]; then
+   echo ""
+   echo "Cleaning up extracted directory: $output_dir"
+   rm -rf "$output_dir"
+ fi
+
+ exit $exit_code
+}
+
+make_command "fetch-releases" "Fetch latest OS release information"
+fetch-releases(){
+ fetch_os_releases "${1:-.cache}"
 }
 
 ##### PLACE YOUR COMMANDS ABOVE #####
