@@ -1,0 +1,21 @@
+=== OS UPDATE STATUS CHECK ===
+Check Date: Mon Feb  9 08:41:55 AM CET 2026
+
+Detected OS: NixOS 25.11 (Xantusia)
+OS ID: nixos
+Version: 25.11
+
+=== NixOS UPDATE STATUS ===
+Status: ✅ CURRENT STABLE RELEASE
+Release: November 2025
+Support: Until approximately May 2026 (next release)
+Compliance: COMPLIANT
+
+Channel Info:
+home-manager https://github.com/nix-community/home-manager/archive/release-21.11.tar.gz
+
+=== RECOMMENDATION ===
+✅ PASS: System is running a current, supported OS version.
+Action: Continue regular updates.
+
+=== END OF OS UPDATE STATUS CHECK ===

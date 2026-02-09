@@ -4,11 +4,53 @@ Make your computer as tough as a honeybadger. And that is tough. Check this vide
 
 [![YouTube](http://i.ytimg.com/vi/4r7wHMg5Yjg/hqdefault.jpg)](https://www.youtube.com/watch?v=4r7wHMg5Yjg)
 
+## Prerequisites
+
+### Linux and macOS
+
+Install the required dependencies:
+
+- **Docker**: Container runtime (required)
+- **Lynis**: Security auditing tool (required)
+- **neofetch**: System information display (required)
+- **tar, sed**: Standard Unix utilities (usually pre-installed)
+
+#### Installing Lynis
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install lynis
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install lynis
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S lynis
+```
+
+**macOS (via Homebrew):**
+```bash
+brew install lynis
+```
+
+**From source (latest version):**
+```bash
+git clone https://github.com/CISOfy/lynis
+cd lynis
+sudo ./lynis audit system
+```
+
+To ensure you have the latest version, check https://github.com/CISOfy/lynis for updates.
+
 ## Usage on Linux and macOS
 
-open a terminal and execute the following.
+Open a terminal and execute the following:
 
-```
+```bash
 git clone https://github.com/wearetechnative/honeybadger
 cd honeybadger
 ./RUNME.sh audit
