@@ -161,12 +161,12 @@ fi
 
 ```bash
 # Fetch latest releases
-./fetch-os-releases.sh
+./lib/fetch-os-releases.sh
 
 # Test with all outputs
-./check-os-status.sh output-casper-30-09-2025/
-./check-os-status.sh output-wtoorren-04-02-2026/
-./check-os-status.sh output-jeroen-01-10-2025/
+./lib/check-os-status.sh output-casper-30-09-2025/
+./lib/check-os-status.sh output-wtoorren-04-02-2026/
+./lib/check-os-status.sh output-jeroen-01-10-2025/
 
 # Verify cache usage
 ls -lh .cache/*.json
@@ -183,7 +183,7 @@ Als cache niet beschikbaar is:
 
 - Cache TTL: 24 uur
 - Automatische refresh bij elke `check-os-status.sh` run als cache > 24h oud
-- Handmatig forceren: `./fetch-os-releases.sh`
+- Handmatig forceren: `./lib/fetch-os-releases.sh`
 
 ## Dependencies
 

@@ -49,12 +49,17 @@ thoroughly auditing device security configurations.
 
 ### File Structure
 - **RUNME.sh**: Main entry point with command framework
-- **_library**: Shared function library (sourced by RUNME.sh)
-  - Cache management functions
-  - OS/kernel release query functions
-  - Status checking and analysis functions
-  - Asset inventory generation
-  - Warnings/suggestions report generation (HTML/PDF)
+- **lib/**: Library directory containing helper scripts and shared functions
+  - **_library**: Shared function library (sourced by RUNME.sh)
+    - Cache management functions
+    - OS/kernel release query functions
+    - Status checking and analysis functions
+    - Asset inventory generation
+    - Warnings/suggestions report generation (HTML/PDF)
+  - **check-os-status.sh**: OS and kernel status checker
+  - **check-os-updates.sh**: OS update stream checker
+  - **fetch-os-releases.sh**: Release information fetcher
+  - **lynis-report-parser.sh**: Lynis report parser
 - **Dockerfile**: Container build configuration (includes wkhtmltopdf for PDF generation)
 - **.cache/**: Cached API responses (24-hour TTL)
   - nixos-releases.json
@@ -72,7 +77,7 @@ thoroughly auditing device security configurations.
 
 ### Architecture Patterns
 - **Main script**: RUNME.sh orchestrates all operations with command framework
-- **Library system**: _library file contains reusable functions (sourced by RUNME.sh)
+- **Library system**: lib/_library file contains reusable functions (sourced by RUNME.sh)
   - Modular design with clearly separated concerns
   - Functions grouped by domain (cache, OS queries, status checking, reporting)
   - Easy to test and maintain
@@ -91,7 +96,7 @@ thoroughly auditing device security configurations.
 - **Cache management**: 24-hour TTL for release information to minimize API calls
 - **Error handling**: Exit on error (set -e), explicit error messages, graceful failure modes
 
-### Library Functions (_library)
+### Library Functions (lib/_library)
 
 #### Cache Management
 - `is_cache_valid()`: Check if cached data is still valid (24h TTL)
@@ -265,30 +270,40 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
     - Generated automatically via Docker + wkhtmltopdf
     - Created during audit phase, not in check-output
     - File ownership may be root (from Docker), attempts automatic fix
-  - neofetch.txt: System information
+  - neofetch.json: System information (JSON format)
   - honeybadger-info.txt: Tool version info
   - blockdevices.txt: Storage configuration
   - screenlock-info.txt: Screen lock settings
   - installed-packages.txt: Package inventory
   - lsb_release.txt: Distribution info (if available)
+  - vulnix.json: CVE vulnerability scan results (NixOS only, if vulnix installed)
+  - trivy.json: CVE vulnerability scan results (Arch/Ubuntu/Kali/macOS, if trivy installed)
+  - cve-summary.txt: Human-readable CVE summary with severity counts
 
 ### RUNME.sh Commands
 - **audit**: Run full security audit and generate report
   - Performs Lynis security audit (requires sudo)
   - Converts Lynis report to JSON using Docker
   - Collects system information (neofetch, packages, block devices, screen lock)
+  - Scans for CVE vulnerabilities (vulnix on NixOS, trivy on others - optional)
   - Generates OS/kernel status report with PASS/FAIL verdict
   - Generates asset inventory table
   - Generates filtered warnings/suggestions report (HTML/PDF via Docker)
+  - Generates CVE summary report (if vulnerability scan completed)
   - Creates compressed tarball with all reports
 
-- **check-output** `<directory|tarball.tar.gz>`: Re-analyze existing audit output
+- **check-output** `<directory|tarball.tar.gz|tarball.tar>`: Re-analyze existing audit output
   - Accepts output directory names (e.g., `output-user-09-02-2026`)
   - Accepts tar.gz files (e.g., `honeybadger-user-09-02-2026.tar.gz`)
-  - Auto-detects and extracts tarballs when directory not found
+  - Accepts tar files (e.g., `honeybadger-user-09-02-2026.tar`)
+  - Auto-detects and extracts archives when directory not found (tries .tar.gz first, then .tar)
   - Prompts before overwriting existing directories (accepts y/n/yes/no)
   - Automatically fetches latest release information
   - Does NOT regenerate warnings/suggestions PDF (only created during audit)
+  - **Generates report file**: `honeybadger-{username}-{date}-report.txt` containing all terminal output
+    - Report includes all processing messages, status analysis, and inventory
+    - Saved in current working directory
+    - Filename derived from input (e.g., `output-user-09-02-2026` → `honeybadger-user-09-02-2026-report.txt`)
   - Generates OS/kernel status report with PASS/FAIL conclusion:
     - **PASS**: System is current, continue regular updates
     - **WARNING**: System is older but supported, upgrade recommended
@@ -346,6 +361,11 @@ Built from `debian:latest` with:
 - **gsettings**: GNOME desktop settings
 - **xfconf-query**: XFCE configuration query
 - **kreadconfig5/6**: KDE configuration reader
+- **vulnix**: CVE vulnerability scanner for NixOS (install: `nix-env -iA nixpkgs.vulnix`)
+- **trivy**: CVE vulnerability scanner for Arch/Ubuntu/Kali/macOS
+  - Ubuntu/Debian: https://aquasecurity.github.io/trivy/latest/getting-started/installation/
+  - Arch Linux: `yay -S trivy` or `pacman -S trivy`
+  - macOS: `brew install trivy`
 
 Note: wkhtmltopdf, pandoc, and jq are NOT required on the host system as they are available in the Docker container.
 

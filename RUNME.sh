@@ -7,8 +7,8 @@ CMDS=();DESC=();NARGS=$#;ARG1=$1;shift;ARGS="$@";make_command(){ CMDS+=($1);DESC
 thisdir="$(dirname "$0")"
 
 # Load library file
-if [[ -f "$thisdir/_library" ]]; then
-    source "$thisdir/_library"
+if [[ -f "$thisdir/lib/_library" ]]; then
+    source "$thisdir/lib/_library"
 fi
 
 ##### PLACE YOUR COMMANDS BELOW #####
@@ -117,7 +117,11 @@ audit(){
    --read-only \
    -v /var/log/lynis-report.dat:/data/lynis-report.dat:ro \
    "$image_name" 2>/dev/null > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
- neofetch | perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g' > $output/neofetch.txt
+ neofetch --off --stdout | jq -Rn '
+   ([inputs | select(length>0)] |
+    (.[0] | capture("^(?<user>[^@]+)@(?<hostname>\\S+)") // {}) +
+    (.[1:] | map(select(contains(":"))) | map(capture("(?<key>[^:]+): (?<value>.*)")) | map({(.key|ascii_downcase|gsub(" "; "_")): .value}) | add // {})
+   )' > $output/neofetch.json
  command -v lsb_release >/dev/null && lsb_release -a > "$output/lsb_release.txt"
  show_version > $output/honeybadger-info.txt
  checkBlockDevices > $output/blockdevices.txt
@@ -172,6 +176,11 @@ audit(){
      fi
    } > "$output/installed-packages.txt" 2>&1
  fi
+
+ # CVE Vulnerability Scanning
+ echo "Scanning for CVE vulnerabilities..."
+ scan_cve_vulnerabilities "$output"
+ generate_cve_summary "$output"
 
  # Check for screen lock tools
  echo "Checking screen lock tools..."
@@ -400,20 +409,64 @@ audit(){
 make_command "check-output" "Check OS and kernel status from existing output"
 check-output(){
  if [[ -z "$1" ]]; then
-   echo "Usage: ./RUNME.sh check-output <output-directory|tarball.tar.gz>"
+   echo "Usage: ./RUNME.sh check-output <output-directory|tarball.tar.gz|tarball.tar>"
    echo "Example: ./RUNME.sh check-output output-wtoorren-09-02-2026"
    echo "Example: ./RUNME.sh check-output honeybadger-wtoorren-09-02-2026.tar.gz"
+   echo "Example: ./RUNME.sh check-output honeybadger-wtoorren-09-02-2026.tar"
+   echo ""
+   echo "This command generates a report file: honeybadger-{username}-{date}-report.txt"
    exit 1
  fi
 
  local input="$1"
  local output_dir=""
  local cleanup_extracted=false
+ local report_file=""
+
+ # Determine report filename based on input
+ # Convert any input format to honeybadger-{username}-{date}-report.txt
+ if [[ "$input" =~ ^output-(.+)$ ]]; then
+   # Input: output-user-09-02-2026 -> honeybadger-user-09-02-2026-report.txt
+   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
+ elif [[ "$input" =~ ^honeybadger-(.+)\.tar\.gz$ ]]; then
+   # Input: honeybadger-user-09-02-2026.tar.gz -> honeybadger-user-09-02-2026-report.txt
+   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
+ elif [[ "$input" =~ ^honeybadger-(.+)\.tar$ ]]; then
+   # Input: honeybadger-user-09-02-2026.tar -> honeybadger-user-09-02-2026-report.txt
+   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
+ elif [[ "$input" =~ ^honeybadger-(.+)$ ]]; then
+   # Input: honeybadger-user-09-02-2026 -> honeybadger-user-09-02-2026-report.txt
+   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
+ else
+   # Fallback: use input as-is with -report.txt suffix
+   report_file="${input}-report.txt"
+ fi
+
+ # Start capturing output to both terminal and report file
+ exec > >(tee "$report_file")
+ exec 2>&1
 
  # Helper function to extract tarball
  extract_tarball() {
    local tarball="$1"
-   local target_dir=$(tar tzf "$tarball" | head -1 | cut -f1 -d"/")
+
+   # Detect compression format and set appropriate tar flags
+   local list_flags=""
+   local extract_flags=""
+   if [[ "$tarball" == *.tar.gz ]]; then
+     # Gzip compressed
+     list_flags="tzf"
+     extract_flags="xzf"
+   elif [[ "$tarball" == *.tar ]]; then
+     # Uncompressed
+     list_flags="tf"
+     extract_flags="xf"
+   else
+     echo "ERROR: Unsupported archive format: $tarball"
+     exit 1
+   fi
+
+   local target_dir=$(tar $list_flags "$tarball" | head -1 | cut -f1 -d"/")
 
    # Check if target directory already exists
    if [[ -d "$target_dir" ]]; then
@@ -433,7 +486,7 @@ check-output(){
    fi
 
    echo "Extracting..."
-   tar xzf "$tarball" || { echo "ERROR: Failed to extract $tarball"; exit 1; }
+   tar $extract_flags "$tarball" || { echo "ERROR: Failed to extract $tarball"; exit 1; }
 
    if [[ ! -d "$target_dir" ]]; then
      echo "ERROR: Could not find extracted directory"
@@ -455,30 +508,48 @@ check-output(){
    echo "Found tar.gz file: $input"
    extract_tarball "$input"
 
- # If input doesn't exist as directory, try to find corresponding tar.gz
- else
-   # Try to find tar.gz with similar name
-   local tarball=""
+ # Check if input is a tar file
+ elif [[ -f "$input" && "$input" == *.tar ]]; then
+   echo "Found tar file: $input"
+   extract_tarball "$input"
 
-   # If input looks like a directory name, try to find matching tar.gz
+ # If input doesn't exist as directory, try to find corresponding archive
+ else
+   # Try to find archive with similar name
+   local tarball_gz=""
+   local tarball_plain=""
+
+   # If input looks like a directory name, try to find matching archives
    if [[ "$input" =~ ^output- ]]; then
-     # Convert output-user-date to honeybadger-user-date.tar.gz
+     # Convert output-user-date to honeybadger-user-date.tar.gz / .tar
      local basename="${input#output-}"
-     tarball="honeybadger-${basename}.tar.gz"
+     tarball_gz="honeybadger-${basename}.tar.gz"
+     tarball_plain="honeybadger-${basename}.tar"
    elif [[ "$input" =~ ^honeybadger- ]]; then
-     tarball="$input"
-     # Add .tar.gz if not present
-     [[ "$tarball" != *.tar.gz ]] && tarball="${tarball}.tar.gz"
+     # Add .tar.gz or .tar if not present
+     if [[ "$input" != *.tar.gz && "$input" != *.tar ]]; then
+       tarball_gz="${input}.tar.gz"
+       tarball_plain="${input}.tar"
+     else
+       # Input already has extension, use as-is
+       tarball_gz="$input"
+       tarball_plain="$input"
+     fi
    else
-     # Just try adding .tar.gz
-     tarball="${input}.tar.gz"
+     # Just try adding .tar.gz or .tar
+     tarball_gz="${input}.tar.gz"
+     tarball_plain="${input}.tar"
    fi
 
-   if [[ -f "$tarball" ]]; then
-     echo "Directory not found, but found tar.gz: $tarball"
-     extract_tarball "$tarball"
+   # Try .tar.gz first, then .tar
+   if [[ -f "$tarball_gz" ]]; then
+     echo "Directory not found, but found tar.gz: $tarball_gz"
+     extract_tarball "$tarball_gz"
+   elif [[ -f "$tarball_plain" ]]; then
+     echo "Directory not found, but found tar: $tarball_plain"
+     extract_tarball "$tarball_plain"
    else
-     echo "ERROR: Could not find directory '$input' or tar.gz file '$tarball'"
+     echo "ERROR: Could not find directory '$input', tar.gz file '$tarball_gz', or tar file '$tarball_plain'"
      exit 1
    fi
  fi
@@ -505,6 +576,12 @@ check-output(){
    echo "Cleaning up extracted directory: $output_dir"
    rm -rf "$output_dir"
  fi
+
+ # Notify user about report file
+ echo ""
+ echo "======================================"
+ echo "Report saved to: $report_file"
+ echo "======================================"
 
  exit $exit_code
 }

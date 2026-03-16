@@ -1,5 +1,23 @@
 # Changelog HoneyBadger
 
+## Unreleased
+
+### Added
+- **CVE Vulnerability Scanning**: Automated CVE detection during audit (ISO27001 Policy 8.1)
+  - NixOS systems: Uses vulnix to scan Nix packages for known vulnerabilities
+  - Arch/Ubuntu/Kali/macOS: Uses trivy for comprehensive filesystem vulnerability scanning
+  - Generates machine-readable JSON output (vulnix.json or trivy.json)
+  - Generates human-readable CVE summary with severity breakdown (cve-summary.txt)
+  - Optional feature: Gracefully skips if scanning tool not installed
+  - 5-minute timeout protection for long-running scans
+  - Installation instructions provided when tools are missing
+
+### Changed
+- **JSON-based System Information**: Replaced neofetch.txt with neofetch.json for structured data access
+  - Uses jq for reliable JSON parsing instead of brittle grep/sed text parsing
+  - Backward compatibility maintained for existing audit archives with neofetch.txt
+  - Improved data extraction reliability for OS info, hardware details, and package detection
+
 ## 0.2.0 - ISO27001 Compliance Enhancement (February 2026)
 
 ### Major Features

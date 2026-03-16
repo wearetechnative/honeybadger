@@ -1,0 +1,94 @@
+Using existing directory: output-wtoorren-27-02-2026
+
+Checking for latest release information...
+Fetching latest OS and kernel release information...
+Cache directory: .cache
+
+  → NixOS releases cache is still valid
+  → Ubuntu releases cache is still valid
+  → Debian releases cache is still valid
+  → Kernel releases cache is still valid
+
+Cache update complete!
+
+=====================================
+  OS & KERNEL STATUS ANALYSIS
+=====================================
+Analysis Date: Mon Mar 16 08:50:59 PM CET 2026
+Source: output-wtoorren-27-02-2026
+
+=====================================
+SECTION 1: OPERATING SYSTEM STATUS
+=====================================
+
+Detected OS: NixOS
+Version: 25.11
+Full Name: NixOS 25.11 (Xantusia)
+
+Distribution: NixOS (Rolling/Stable)
+
+1. IS CURRENT OS VERSION AN ACTIVE UPDATE STREAM?
+---------------------------------------------------
+Status: YES - CURRENT STABLE RELEASE
+Update Stream: ACTIVE
+
+=====================================
+SECTION 2: KERNEL VERSION STATUS
+=====================================
+
+Detected Kernel: 6.12.76
+
+
+=====================================
+OVERALL SYSTEM STATUS
+=====================================
+
+Result: ✓ PASS
+
+Your system is running a supported operating system version
+with an active update stream. No immediate action required.
+
+Recommendations:
+  - Continue applying regular system updates
+  - Monitor for new releases and security updates
+  - Review this report periodically (at least quarterly)
+
+=====================================
+END OF REPORT
+=====================================
+
+Generating asset inventory...
+=====================================
+  ASSET INVENTORY
+=====================================
+
+This table contains asset information extracted from the audit report.
+
+Field                               | Value
+------------------------------------+-----------------------------------------
+Hostname (Asset ID)                 | lobos
+Serial Number / Model               | LENOVO 21K9CTO1WW 
+Description                         | Personal Device
+OS Edition + Version                | NixOS 25.11 (Xantusia)
+Kernel Version                      | 6.12.76 
+Nix Installed                       | Yes (NixOS)
+Disk Encryption                     | Yes (LUKS)
+Screen Lock                         | Yes (Auto-lock: 10 minutes)
+Malware Scanner                     | No
+Firewall Active                     | No
+OS Up-to-date                       | Yes (Current)
+Owner / User                        | wtoorren
+Last Audit Date                     | 27-02-2026
+
+=====================================
+Notes:
+  - Serial number may require manual verification
+  - 'No suspicious software detected' requires manual review of:
+    * installed-packages.txt
+    * lynis-report.json security warnings
+  - Defender (AV) status: See 'Malware Scanner' field
+=====================================
+
+======================================
+Report saved to: honeybadger-wtoorren-27-02-2026-report.txt
+======================================
