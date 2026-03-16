@@ -3,4 +3,4 @@
 **.bz2
 output-*/
 .**sw*
-.cache/*
+.cache/
