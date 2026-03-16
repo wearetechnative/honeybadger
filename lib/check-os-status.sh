@@ -129,23 +129,31 @@ if [[ -f "$OUTPUT_DIR/lynis-report.json" ]]; then
     fi
 fi
 
-# Fallback to neofetch.txt or fastfetch.txt
+# Fallback to neofetch.json, neofetch.txt or fastfetch.txt
 FETCH_FILE=""
-if [[ -f "$OUTPUT_DIR/neofetch.txt" ]]; then
+FETCH_FORMAT=""
+if [[ -f "$OUTPUT_DIR/neofetch.json" ]]; then
+    FETCH_FILE="$OUTPUT_DIR/neofetch.json"
+    FETCH_FORMAT="json"
+elif [[ -f "$OUTPUT_DIR/neofetch.txt" ]]; then
     FETCH_FILE="$OUTPUT_DIR/neofetch.txt"
+    FETCH_FORMAT="txt"
 elif [[ -f "$OUTPUT_DIR/fastfetch.txt" ]]; then
     FETCH_FILE="$OUTPUT_DIR/fastfetch.txt"
+    FETCH_FORMAT="txt"
 fi
 
 if [[ -n "$FETCH_FILE" ]]; then
     # Get OS info if not already set
     if [[ -z "$OS_NAME" ]]; then
-        OS_LINE=$(grep "^OS:" "$FETCH_FILE" | head -1)
-        if [[ -n "$OS_LINE" ]]; then
-            # Parse: "OS: NixOS 25.11.20260103.30a3c51 (Xantusia) x86_64"
-            # or: "OS: Kali GNU/Linux Rolling x86_64"
-            OS_FULLNAME=$(echo "$OS_LINE" | sed 's/^OS: //')
+        if [[ "$FETCH_FORMAT" == "json" ]]; then
+            OS_FULLNAME=$(jq -r '.os // empty' "$FETCH_FILE" 2>/dev/null)
+        else
+            OS_LINE=$(grep "^OS:" "$FETCH_FILE" | head -1)
+            [[ -n "$OS_LINE" ]] && OS_FULLNAME=$(echo "$OS_LINE" | sed 's/^OS: //')
+        fi
 
+        if [[ -n "$OS_FULLNAME" ]]; then
             # Handle different formats
             if [[ "$OS_FULLNAME" =~ "Kali" ]]; then
                 OS_NAME="Kali"
@@ -160,11 +168,14 @@ if [[ -n "$FETCH_FILE" ]]; then
 
     # Always try to get kernel from fetch file (more reliable than lynis)
     if [[ -z "$KERNEL_VERSION" ]]; then
-        # Try both formats: "Kernel: 6.12.63" and "Kernel: Linux 6.12.25-amd64"
-        KERNEL_LINE=$(grep "^Kernel:" "$FETCH_FILE" | head -1)
-        if [[ -n "$KERNEL_LINE" ]]; then
-            # Extract version number (handles both "6.12.63" and "Linux 6.12.25-amd64")
-            KERNEL_VERSION=$(echo "$KERNEL_LINE" | grep -oP '\d+\.\d+\.\d+' | head -1)
+        if [[ "$FETCH_FORMAT" == "json" ]]; then
+            KERNEL_RAW=$(jq -r '.kernel // empty' "$FETCH_FILE" 2>/dev/null)
+            [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
+        else
+            KERNEL_LINE=$(grep "^Kernel:" "$FETCH_FILE" | head -1)
+            if [[ -n "$KERNEL_LINE" ]]; then
+                KERNEL_VERSION=$(echo "$KERNEL_LINE" | grep -oP '\d+\.\d+\.\d+' | head -1)
+            fi
         fi
     fi
 fi
@@ -270,7 +281,7 @@ case "$OS_NAME" in
             echo "---------------------------------------------------" >> "$REPORT_FILE"
             echo "Version: $OS_VERSION" >> "$REPORT_FILE"
             echo "Note: Unable to fetch release data. Please verify manually at https://nixos.org" >> "$REPORT_FILE"
-            echo "Recommendation: Update release cache with ./fetch-os-releases.sh" >> "$REPORT_FILE"
+            echo "Recommendation: Update release cache with ./lib/fetch-os-releases.sh" >> "$REPORT_FILE"
         fi
         ;;
 

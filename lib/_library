@@ -261,21 +261,31 @@ extract_os_info() {
         fi
     fi
 
-    # Fallback to neofetch.txt or fastfetch.txt
+    # Fallback to neofetch.json, neofetch.txt, or fastfetch.txt
     local fetch_file=""
-    if [[ -f "$output_dir/neofetch.txt" ]]; then
+    local fetch_format=""
+    if [[ -f "$output_dir/neofetch.json" ]]; then
+        fetch_file="$output_dir/neofetch.json"
+        fetch_format="json"
+    elif [[ -f "$output_dir/neofetch.txt" ]]; then
         fetch_file="$output_dir/neofetch.txt"
+        fetch_format="txt"
     elif [[ -f "$output_dir/fastfetch.txt" ]]; then
         fetch_file="$output_dir/fastfetch.txt"
+        fetch_format="txt"
     fi
 
     if [[ -n "$fetch_file" ]]; then
         # Get OS info if not already set
         if [[ -z "$OS_NAME" ]]; then
-            local os_line=$(grep "^OS:" "$fetch_file" | head -1)
-            if [[ -n "$os_line" ]]; then
-                OS_FULLNAME=$(echo "$os_line" | sed 's/^OS: //')
+            if [[ "$fetch_format" == "json" ]]; then
+                OS_FULLNAME=$(jq -r '.os // empty' "$fetch_file" 2>/dev/null)
+            else
+                local os_line=$(grep "^OS:" "$fetch_file" | head -1)
+                [[ -n "$os_line" ]] && OS_FULLNAME=$(echo "$os_line" | sed 's/^OS: //')
+            fi
 
+            if [[ -n "$OS_FULLNAME" ]]; then
                 # Handle different formats
                 if [[ "$OS_FULLNAME" =~ "Kali" ]]; then
                     OS_NAME="Kali"
@@ -290,9 +300,14 @@ extract_os_info() {
 
         # Always try to get kernel from fetch file
         if [[ -z "$KERNEL_VERSION" ]]; then
-            local kernel_line=$(grep "^Kernel:" "$fetch_file" | head -1)
-            if [[ -n "$kernel_line" ]]; then
-                KERNEL_VERSION=$(echo "$kernel_line" | grep -oP '\d+\.\d+\.\d+' | head -1)
+            if [[ "$fetch_format" == "json" ]]; then
+                KERNEL_RAW=$(jq -r '.kernel // empty' "$fetch_file" 2>/dev/null)
+                [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
+            else
+                local kernel_line=$(grep "^Kernel:" "$fetch_file" | head -1)
+                if [[ -n "$kernel_line" ]]; then
+                    KERNEL_VERSION=$(echo "$kernel_line" | grep -oP '\d+\.\d+\.\d+' | head -1)
+                fi
             fi
         fi
     fi
@@ -687,15 +702,24 @@ generate_asset_inventory() {
         [[ "$firewall_active" == "1" ]] && firewall_active="Yes" || firewall_active="No"
     fi
 
-    # Get hardware info from neofetch.txt
-    if [[ -f "$output_dir/neofetch.txt" ]]; then
+    # Get hardware info from neofetch.json or neofetch.txt
+    if [[ -f "$output_dir/neofetch.json" ]]; then
+        # Extract from JSON
+        owner=$(jq -r '.user // empty' "$output_dir/neofetch.json" 2>/dev/null)
+        model=$(jq -r '.host // empty' "$output_dir/neofetch.json" 2>/dev/null)
+        kernel=$(jq -r '.kernel // empty' "$output_dir/neofetch.json" 2>/dev/null)
+
+        # If hostname not found in lynis, get from neofetch JSON
+        if [[ "$hostname" == "Unknown" ]]; then
+            local json_hostname=$(jq -r '.hostname // empty' "$output_dir/neofetch.json" 2>/dev/null)
+            [[ -n "$json_hostname" ]] && hostname="$json_hostname"
+        fi
+    elif [[ -f "$output_dir/neofetch.txt" ]]; then
+        # Fallback to text parsing for backward compatibility
         owner=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f1 | head -1)
         model=$(grep "^Host:" "$output_dir/neofetch.txt" | sed 's/^Host: //' | head -1)
-
-        # Get kernel version from neofetch (more reliable than lynis)
         kernel=$(grep "^Kernel:" "$output_dir/neofetch.txt" | sed 's/^Kernel: //' | head -1)
 
-        # If hostname not found in lynis, get from neofetch
         if [[ "$hostname" == "Unknown" ]]; then
             hostname=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f2 | awk '{print $1}' | head -1)
         fi
@@ -725,6 +749,12 @@ generate_asset_inventory() {
     # Check for Nix installation
     if [[ "$os_full" =~ "NixOS" ]]; then
         nix_installed="Yes (NixOS)"
+    elif [[ -f "$output_dir/neofetch.json" ]]; then
+        # Check JSON for nix packages
+        local packages=$(jq -r '.packages // empty' "$output_dir/neofetch.json" 2>/dev/null)
+        if [[ -n "$packages" ]] && echo "$packages" | grep -q "nix-"; then
+            nix_installed="Yes"
+        fi
     elif [[ -f "$output_dir/neofetch.txt" ]] && grep -q "nix-" "$output_dir/neofetch.txt"; then
         nix_installed="Yes"
     elif [[ -f "$output_dir/installed-packages.txt" ]] && grep -qi "nix" "$output_dir/installed-packages.txt"; then
@@ -1009,4 +1039,239 @@ HTML_FOOTER
     # Cleanup
     rm -f "$temp_html"
     return 0
+}
+
+# ==============================================================================
+# CVE VULNERABILITY SCANNING FUNCTIONS
+# ==============================================================================
+
+# Scan system for CVE vulnerabilities using OS-appropriate tool
+# Usage: scan_cve_vulnerabilities <output_directory>
+scan_cve_vulnerabilities() {
+    local output_dir="$1"
+
+    if [[ -z "$output_dir" ]]; then
+        echo "ERROR: Output directory not specified for CVE scan"
+        return 1
+    fi
+
+    # Detect OS type from neofetch.json or system info
+    local os_name=""
+    if [[ -f "$output_dir/neofetch.json" ]]; then
+        os_name=$(jq -r '.os // empty' "$output_dir/neofetch.json" 2>/dev/null | awk '{print $1}')
+    fi
+
+    # Fallback to system detection
+    if [[ -z "$os_name" ]] && [[ -f /etc/os-release ]]; then
+        os_name=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+    fi
+
+    echo "Scanning for CVE vulnerabilities..."
+
+    # Choose scanning tool based on OS
+    if [[ "$os_name" == "NixOS" ]] || [[ -f /etc/nixos/configuration.nix ]]; then
+        scan_vulnix "$output_dir"
+    else
+        scan_trivy "$output_dir"
+    fi
+}
+
+# Scan NixOS system with vulnix
+# Usage: scan_vulnix <output_directory>
+scan_vulnix() {
+    local output_dir="$1"
+    local output_file="$output_dir/vulnix.json"
+
+    # Check if vulnix is available
+    if ! command -v vulnix >/dev/null 2>&1; then
+        echo "INFO: vulnix not installed, CVE scanning skipped"
+        echo "Install with: nix-env -iA nixpkgs.vulnix"
+        return 0
+    fi
+
+    echo "Running vulnix scan on NixOS system..."
+
+    # Run vulnix with timeout (5 minutes)
+    if timeout 300 vulnix --json /run/current-system > "$output_file" 2>&1; then
+        echo "✓ CVE scan completed: $output_file"
+        return 0
+    else
+        local exit_code=$?
+        if [[ $exit_code -eq 124 ]]; then
+            echo "⚠ CVE scan timeout (5 minutes exceeded), scan incomplete"
+        else
+            echo "⚠ CVE scan failed with exit code $exit_code"
+        fi
+        # Remove incomplete output
+        rm -f "$output_file"
+        return 1
+    fi
+}
+
+# Scan filesystem with trivy
+# Usage: scan_trivy <output_directory>
+scan_trivy() {
+    local output_dir="$1"
+    local output_file="$output_dir/trivy.json"
+
+    # Check if trivy is available
+    if ! command -v trivy >/dev/null 2>&1; then
+        echo "INFO: trivy not installed, CVE scanning skipped"
+        echo "Install instructions:"
+        echo "  Ubuntu/Debian: wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add - && echo 'deb https://aquasecurity.github.io/trivy-repo/deb \$(lsb_release -sc) main' | sudo tee /etc/apt/sources.list.d/trivy.list && sudo apt update && sudo apt install trivy"
+        echo "  Arch Linux: yay -S trivy"
+        echo "  macOS: brew install trivy"
+        return 0
+    fi
+
+    echo "Running trivy scan on filesystem..."
+
+    # Run trivy with timeout (5 minutes)
+    # --scanners vuln: Only scan for vulnerabilities (not misconfigs or secrets)
+    # --format json: Output JSON format
+    # --quiet: Suppress progress output
+    if timeout 300 trivy rootfs --format json --scanners vuln --quiet / > "$output_file" 2>&1; then
+        echo "✓ CVE scan completed: $output_file"
+        return 0
+    else
+        local exit_code=$?
+        if [[ $exit_code -eq 124 ]]; then
+            echo "⚠ CVE scan timeout (5 minutes exceeded), scan incomplete"
+        else
+            echo "⚠ CVE scan failed with exit code $exit_code"
+        fi
+        # Remove incomplete output
+        rm -f "$output_file"
+        return 1
+    fi
+}
+
+# Generate CVE summary report from scan results
+# Usage: generate_cve_summary <output_directory>
+generate_cve_summary() {
+    local output_dir="$1"
+    local vulnix_file="$output_dir/vulnix.json"
+    local trivy_file="$output_dir/trivy.json"
+    local summary_file="$output_dir/cve-summary.txt"
+
+    if [[ -z "$output_dir" ]]; then
+        echo "ERROR: Output directory not specified for CVE summary"
+        return 1
+    fi
+
+    # Check which scan file exists
+    if [[ -f "$vulnix_file" ]]; then
+        generate_vulnix_summary "$vulnix_file" "$summary_file"
+    elif [[ -f "$trivy_file" ]]; then
+        generate_trivy_summary "$trivy_file" "$summary_file"
+    else
+        # No CVE scan results, skip summary
+        return 0
+    fi
+}
+
+# Generate summary from vulnix results
+# Usage: generate_vulnix_summary <vulnix_json> <output_file>
+generate_vulnix_summary() {
+    local vulnix_json="$1"
+    local output_file="$2"
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: jq not available, cannot generate CVE summary"
+        return 1
+    fi
+
+    # Parse vulnix JSON (array of CVE objects)
+    local total=$(jq 'length' "$vulnix_json" 2>/dev/null || echo "0")
+
+    # Vulnix doesn't provide severity ratings, all CVEs are listed
+    # We'll count them as "unrated" since vulnix focuses on NixOS packages
+
+    {
+        echo "======================================"
+        echo "  CVE VULNERABILITY SCAN SUMMARY"
+        echo "======================================"
+        echo ""
+        echo "Scan Date: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Tool: vulnix (NixOS vulnerability scanner)"
+        echo ""
+        echo "Total CVEs Found: $total"
+        echo ""
+        if [[ $total -gt 0 ]]; then
+            echo "Status: ⚠ VULNERABILITIES DETECTED"
+            echo ""
+            echo "Note: Vulnix reports CVEs for Nix packages."
+            echo "Review vulnix.json for detailed vulnerability information."
+            echo ""
+            echo "Action Required:"
+            echo "  - Review detected CVEs in vulnix.json"
+            echo "  - Update affected packages: nixos-rebuild switch --upgrade"
+            echo "  - Check NixOS security advisories"
+        else
+            echo "Status: ✓ NO VULNERABILITIES DETECTED"
+        fi
+        echo ""
+        echo "======================================"
+    } > "$output_file"
+
+    echo "✓ CVE summary generated: $output_file"
+}
+
+# Generate summary from trivy results
+# Usage: generate_trivy_summary <trivy_json> <output_file>
+generate_trivy_summary() {
+    local trivy_json="$1"
+    local output_file="$2"
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: jq not available, cannot generate CVE summary"
+        return 1
+    fi
+
+    # Parse trivy JSON structure
+    # Trivy JSON has: .Results[].Vulnerabilities[] with .Severity field
+    local critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$trivy_json" 2>/dev/null || echo "0")
+    local high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$trivy_json" 2>/dev/null || echo "0")
+    local medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$trivy_json" 2>/dev/null || echo "0")
+    local low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$trivy_json" 2>/dev/null || echo "0")
+    local total=$((critical + high + medium + low))
+
+    {
+        echo "======================================"
+        echo "  CVE VULNERABILITY SCAN SUMMARY"
+        echo "======================================"
+        echo ""
+        echo "Scan Date: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Tool: trivy (filesystem vulnerability scanner)"
+        echo ""
+        echo "Total CVEs Found: $total"
+        echo ""
+        echo "Severity Breakdown:"
+        echo "  Critical: $critical"
+        echo "  High:     $high"
+        echo "  Medium:   $medium"
+        echo "  Low:      $low"
+        echo ""
+
+        if [[ $critical -gt 0 ]] || [[ $high -gt 0 ]]; then
+            echo "Status: ✗ ACTION REQUIRED - Critical/High CVEs Detected"
+            echo ""
+            echo "Action Required:"
+            echo "  - Review critical and high severity CVEs in trivy.json"
+            echo "  - Update affected packages immediately"
+            echo "  - Apply security patches as soon as possible"
+        elif [[ $total -gt 0 ]]; then
+            echo "Status: ⚠ VULNERABILITIES DETECTED (Medium/Low)"
+            echo ""
+            echo "Recommendation:"
+            echo "  - Review detected CVEs in trivy.json"
+            echo "  - Plan updates during next maintenance window"
+        else
+            echo "Status: ✓ NO VULNERABILITIES DETECTED"
+        fi
+        echo ""
+        echo "======================================"
+    } > "$output_file"
+
+    echo "✓ CVE summary generated: $output_file"
 }

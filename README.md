@@ -15,6 +15,11 @@ Install the required dependencies:
 - **neofetch**: System information display (required)
 - **tar, sed**: Standard Unix utilities (usually pre-installed)
 
+Optional dependencies for CVE vulnerability scanning:
+
+- **vulnix**: CVE scanner for NixOS (optional, NixOS only)
+- **trivy**: CVE scanner for Arch/Ubuntu/Kali/macOS (optional)
+
 #### Installing Lynis
 
 **Debian/Ubuntu:**
@@ -45,6 +50,37 @@ sudo ./lynis audit system
 ```
 
 To ensure you have the latest version, check https://github.com/CISOfy/lynis for updates.
+
+#### Installing CVE Scanners (Optional)
+
+For CVE vulnerability scanning support, install the appropriate tool for your system:
+
+**NixOS (vulnix):**
+```bash
+nix-env -iA nixpkgs.vulnix
+```
+
+**Ubuntu/Debian (trivy):**
+```bash
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+sudo apt update
+sudo apt install trivy
+```
+
+**Arch Linux (trivy):**
+```bash
+yay -S trivy
+# or
+sudo pacman -S trivy
+```
+
+**macOS (trivy):**
+```bash
+brew install trivy
+```
+
+Note: CVE scanning is optional. If the scanner is not installed, the audit will skip CVE scanning and continue with other checks.
 
 ## Usage on Linux and macOS
 
