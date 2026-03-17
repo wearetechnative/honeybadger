@@ -89,8 +89,10 @@ Open a terminal and execute the following:
 ```bash
 git clone https://github.com/wearetechnative/honeybadger
 cd honeybadger
-./RUNME.sh audit
+sudo ./RUNME.sh audit
 ```
+
+**Note:** The audit requires root privileges to perform a complete system security scan. The script will not run without sudo.
 
 ## Usage on Windows
 
@@ -109,6 +111,61 @@ same directory. It looks like this: `honeybadger-pim-28-02-2025.tar.bz2`. Send
 this file to the CISO or the person who asked you to do run this audit script.
 
 The output is available in a bz2 file.
+
+## Server Report Submission
+
+Honeybadger can optionally submit audit reports to a centralized honeybadger-server for compliance monitoring and tracking.
+
+### Configuration
+
+Create a configuration file at one of these locations (checked in order):
+1. `./.honeybadger.conf` (current directory)
+2. `~/.honeybadger.conf` (user home directory)
+3. `/etc/honeybadger.conf` (system-wide)
+
+Example configuration (see `.honeybadger.conf.example`):
+
+```bash
+# Enable server submission
+SERVER_ENABLED=true
+
+# Server URL
+SERVER_URL=http://honeybadger-server:7123/
+
+# Connection timeout in seconds
+SERVER_TIMEOUT=30
+
+# Number of retry attempts on network failures
+SERVER_RETRY_COUNT=3
+
+# Dry-run mode: log what would be submitted without actual HTTP requests
+DRY_RUN=false
+```
+
+### Submitting Reports
+
+After running an audit, you can submit the reports to the server:
+
+```bash
+# Submit the most recent audit reports
+./RUNME.sh submit
+
+# Submit reports from a specific directory
+./RUNME.sh submit output-hostname-user-17-03-2026
+```
+
+**Note:** Report submission is completely separate from the audit command. The audit generates local reports only. You must explicitly run the submit command to send reports to the server.
+
+### Dry-Run Mode
+
+To test submission without actually sending data to the server:
+
+```bash
+# Set DRY_RUN=true in your config file, then run:
+./RUNME.sh submit
+```
+
+This will show what would be submitted, including the exact curl commands that would be executed.
 
 ## Credits
 

@@ -18,6 +18,8 @@ thoroughly auditing device security configurations.
 - ✅ **Warnings/Suggestions Report**: Filtered security issues with HTML/PDF output via Docker
 - ✅ **Library Architecture**: Modular, reusable functions in _library file
 - ✅ **Docker-based PDF Generation**: wkhtmltopdf in container for reliable cross-platform PDF creation
+- ✅ **CVE Vulnerability Scanning**: Optional CVE scanning with vulnix (NixOS) or trivy (Arch/Ubuntu/Kali/macOS)
+- ✅ **Server Report Submission**: Optional centralized reporting via HTTP POST to honeybadger-server
 
 ### In Production
 - Audit generation with comprehensive security assessment
@@ -129,6 +131,41 @@ thoroughly auditing device security configurations.
   - Generates styled HTML with color-coded sections
   - Converts HTML to PDF using Docker + wkhtmltopdf
   - Attempts to fix ownership of root-created PDF files
+
+#### CVE Vulnerability Scanning
+- `scan_cve_vulnerabilities()`: Scan for CVE vulnerabilities using OS-specific tools
+  - Uses vulnix on NixOS (scans /run/current-system)
+  - Uses trivy on Arch/Ubuntu/Kali/macOS (scans filesystem and OS packages)
+  - Generates JSON output with vulnerability details
+  - Handles exit code 2 from scanners (vulnerabilities found, not error)
+  - 300-second timeout for large scans
+  - Validates JSON output before accepting results
+- `generate_cve_summary()`: Create human-readable CVE summary report
+  - Parses JSON from vulnix or trivy
+  - Counts vulnerabilities by severity (Critical, High, Medium, Low)
+  - Generates actionable recommendations based on findings
+  - Separate summary generators for vulnix and trivy formats
+
+#### Server Report Submission
+- `load_server_config()`: Load configuration from .honeybadger.conf files
+  - Checks: ./.honeybadger.conf, ~/.honeybadger.conf, /etc/honeybadger.conf
+  - Uses first found, falls back to defaults
+  - Configuration options: SERVER_ENABLED, SERVER_URL, SERVER_TIMEOUT, SERVER_RETRY_COUNT, DRY_RUN
+- `find_latest_output_dir()`: Auto-detect most recent output-* directory
+  - Sorts by modification time (newest first)
+  - Returns error if no output directories found
+- `submit_report()`: Submit single report to server via HTTP POST
+  - Auto-detects hostname and username
+  - Sets proper HTTP headers (Content-Type, X-Hostname, X-Username, X-Report-Type)
+  - Implements retry logic with exponential backoff (1s, 2s, 4s)
+  - Handles client errors (4xx) without retry
+  - Retries on server errors (5xx) and network failures
+  - Supports dry-run mode (logs without submitting)
+- `submit_all_reports()`: Submit all reports from output directory
+  - Submits neofetch.json, lynis-report.json, vulnix.json/trivy.json
+  - Tracks success/failure counts
+  - Generates submission summary
+  - Returns 0 if at least one report succeeded, 1 if all failed
 
 ### Testing Strategy
 - Dependency validation before execution (checkdeps function)
@@ -281,8 +318,9 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
   - cve-summary.txt: Human-readable CVE summary with severity counts
 
 ### RUNME.sh Commands
-- **audit**: Run full security audit and generate report
-  - Performs Lynis security audit (requires sudo)
+- **audit**: Run full security audit and generate report (Usage: `sudo ./RUNME.sh audit`)
+  - **Requires root privileges** - script will exit with error if not run with sudo
+  - Performs Lynis security audit
   - Converts Lynis report to JSON using Docker
   - Collects system information (neofetch, packages, block devices, screen lock)
   - Scans for CVE vulnerabilities (vulnix on NixOS, trivy on others - optional)
@@ -322,6 +360,30 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
   - Fetches from kernel.org
   - Respects 24-hour cache TTL
   - Optional custom cache directory
+
+- **submit** `[output-directory]`: Submit audit reports to honeybadger-server
+  - **IMPORTANT**: Completely separate from audit command
+  - Audit generates local reports only - submission is explicit opt-in
+  - Usage: `./RUNME.sh submit` (submits most recent reports)
+  - Usage: `./RUNME.sh submit output-hostname-user-17-03-2026` (submit specific directory)
+  - Requires configuration file (.honeybadger.conf) with SERVER_ENABLED=true
+  - Configuration locations (checked in order):
+    1. ./.honeybadger.conf (current directory)
+    2. ~/.honeybadger.conf (user home directory)
+    3. /etc/honeybadger.conf (system-wide)
+  - Configuration options:
+    - SERVER_ENABLED: Enable/disable submission (default: false)
+    - SERVER_URL: Server endpoint (default: http://localhost:7123/)
+    - SERVER_TIMEOUT: Connection timeout in seconds (default: 30)
+    - SERVER_RETRY_COUNT: Number of retry attempts (default: 3)
+    - DRY_RUN: Test mode without actual HTTP requests (default: false)
+  - Submits JSON reports: neofetch.json, lynis-report.json, vulnix.json/trivy.json
+  - HTTP POST with headers: X-Hostname, X-Username, X-Report-Type
+  - Retry logic with exponential backoff (1s, 2s, 4s)
+  - Fails gracefully if server unavailable
+  - Returns exit code 0 if at least one report submitted successfully
+  - Returns exit code 1 if all submissions failed or invalid directory
+  - Dry-run mode: Logs what would be submitted with curl command preview
 
 ## External Dependencies
 

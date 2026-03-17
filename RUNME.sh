@@ -80,6 +80,14 @@ make_command "audit" "Run Audit Tool to create report"
 audit(){
  set -e  # Exit on error
 
+ # Check if running as root
+ if [[ $EUID -ne 0 ]]; then
+   echo "ERROR: Audit requires root privileges"
+   echo "Please run with sudo:"
+   echo "  sudo ./RUNME.sh audit"
+   exit 1
+ fi
+
  show_version
  checkOS
  #checkdeps "jq"
@@ -90,12 +98,16 @@ audit(){
  checkdeps "tar"
  deps_missing
 
- output=output-$(whoami)-$(date +"%d-%m-%Y")
- tarball=honeybadger-$(whoami)-$(date +"%d-%m-%Y").tar.gz
+ # Use SUDO_USER if running with sudo, otherwise use current user
+ local actual_user="${SUDO_USER:-$(whoami)}"
+ local hostname=$(hostname -s)
+
+ output=output-${hostname}-${actual_user}-$(date +"%d-%m-%Y")
+ tarball=honeybadger-${hostname}-${actual_user}-$(date +"%d-%m-%Y").tar.gz
  mkdir -p $output
 
  echo "Running Lynis audit..."
- sudo lynis audit system || { echo "ERROR: Lynis audit failed"; exit 1; }
+ lynis audit system || { echo "ERROR: Lynis audit failed"; exit 1; }
 
  # Check if Docker image needs rebuild (if Dockerfile is newer than image)
  echo "Checking Docker image..."
@@ -404,6 +416,48 @@ audit(){
  fi
 
  tar czf $tarball $output
+}
+
+make_command "submit" "Submit audit reports to honeybadger-server"
+submit(){
+ # Parse optional output directory parameter
+ local output_dir="$1"
+
+ # If no directory specified, find the most recent one
+ if [[ -z "$output_dir" ]]; then
+   echo "No output directory specified, searching for most recent..."
+   output_dir=$(find_latest_output_dir)
+   if [[ $? -ne 0 ]]; then
+     echo "ERROR: Could not find any output-* directories"
+     echo ""
+     echo "Usage: ./RUNME.sh submit [output-directory]"
+     echo "Example: ./RUNME.sh submit output-hostname-user-17-03-2026"
+     echo ""
+     echo "Or run an audit first:"
+     echo "  sudo ./RUNME.sh audit"
+     exit 1
+   fi
+   echo "Found: $output_dir"
+   echo ""
+ fi
+
+ # Validate directory exists
+ if [[ ! -d "$output_dir" ]]; then
+   echo "ERROR: Output directory does not exist: $output_dir"
+   echo ""
+   echo "Usage: ./RUNME.sh submit [output-directory]"
+   echo "Example: ./RUNME.sh submit output-hostname-user-17-03-2026"
+   echo ""
+   echo "Available directories:"
+   ls -dt output-* 2>/dev/null || echo "  (none found)"
+   exit 1
+ fi
+
+ # Submit all reports
+ submit_all_reports "$output_dir"
+ exit_code=$?
+
+ exit $exit_code
 }
 
 make_command "check-output" "Check OS and kernel status from existing output"
