@@ -1,5 +1,54 @@
 # Changelog HoneyBadger
 
+## 0.4.0 - Required Dependencies & Bug Fixes (March 2026)
+
+### Breaking Changes
+
+#### CVE Scanners Now Required
+- **CVE vulnerability scanning is now mandatory** for complete security audits
+  - NixOS systems: vulnix is required (install: `nix-env -iA nixpkgs.vulnix`)
+  - Other systems: trivy is required (see installation instructions in README)
+  - Audit will exit with error if appropriate scanner is not installed
+  - Ensures ISO27001 compliance (Policy 8.1 - vulnerability assessment)
+  - No more silent skipping of CVE scanning
+
+#### Additional Required Dependencies
+- **jq**: JSON processor is now required (was implicitly required but not enforced)
+  - Used extensively for parsing lynis-report.json, neofetch.json, OS status checking
+  - Audit will exit if jq is not installed
+- **curl**: HTTP client is now required (was implicitly required but not enforced)
+  - Used for fetching OS release information from APIs
+  - Audit will exit if curl is not installed
+
+### Fixed
+
+#### Neofetch Username Shows Actual User
+- **Fixed**: neofetch.json now captures actual username instead of "root"
+  - Previously: Running `sudo ./RUNME.sh audit` captured "root" as username
+  - Now: Captures original user who invoked sudo (e.g., "wtoorren")
+  - Uses `sudo -u "${SUDO_USER:-$(whoami)}"` to run neofetch as actual user
+  - Ensures consistent user identification across all outputs:
+    - Output directory: `output-hostname-user-date` ✓
+    - neofetch.json: `{"user": "actualuser"}` ✓
+    - Server headers: `X-Username: actualuser` ✓
+  - Improves compliance reporting and asset inventory accuracy
+
+### Migration Guide
+
+**For users upgrading from 0.3.0:**
+
+1. **Install CVE scanner** (now required):
+   - NixOS: `nix-env -iA nixpkgs.vulnix`
+   - Ubuntu/Debian: Follow trivy installation in README
+   - Arch: `sudo pacman -S trivy` or `yay -S trivy`
+   - macOS: `brew install trivy`
+
+2. **Verify jq and curl are installed** (usually already present):
+   - Most systems: `sudo apt install jq curl` or `sudo pacman -S jq curl`
+   - macOS: `brew install jq curl`
+
+3. **Next audit will capture correct username** in neofetch.json (no action needed)
+
 ## 0.3.0 - Security & Compliance Enhancement (March 2026)
 
 ### Added
