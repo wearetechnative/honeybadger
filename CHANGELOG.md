@@ -1,22 +1,61 @@
 # Changelog HoneyBadger
 
-## Unreleased
+## 0.3.0 - Security & Compliance Enhancement (March 2026)
 
 ### Added
-- **CVE Vulnerability Scanning**: Automated CVE detection during audit (ISO27001 Policy 8.1)
+
+#### Server Report Submission
+- **Centralized Compliance Monitoring**: Submit audit reports to honeybadger-server via HTTP POST
+  - New command: `./RUNME.sh submit [output-directory]`
+  - **Important**: Submit is completely separate from audit (explicit opt-in)
+  - Auto-detection of most recent output directory
+  - Configuration file support (.honeybadger.conf)
+  - Configuration precedence: ./.honeybadger.conf → ~/.honeybadger.conf → /etc/honeybadger.conf
+  - HTTP POST with custom headers (X-Hostname, X-Username, X-Report-Type)
+  - Retry logic with exponential backoff (1s, 2s, 4s delays)
+  - Graceful failure handling (submission errors don't block audit)
+  - Dry-run mode for testing without actual submission
+  - Configuration options:
+    - SERVER_ENABLED (default: false)
+    - SERVER_URL (default: http://localhost:7123/)
+    - SERVER_TIMEOUT (default: 30 seconds)
+    - SERVER_RETRY_COUNT (default: 3)
+    - DRY_RUN (default: false)
+  - Submits JSON reports: neofetch.json, lynis-report.json, vulnix.json/trivy.json
+  - Returns exit 0 if at least one report submitted successfully
+
+#### CVE Vulnerability Scanning
+- **Automated CVE Detection**: CVE scanning during audit (ISO27001 Policy 8.1)
   - NixOS systems: Uses vulnix to scan Nix packages for known vulnerabilities
   - Arch/Ubuntu/Kali/macOS: Uses trivy for comprehensive filesystem vulnerability scanning
   - Generates machine-readable JSON output (vulnix.json or trivy.json)
   - Generates human-readable CVE summary with severity breakdown (cve-summary.txt)
   - Optional feature: Gracefully skips if scanning tool not installed
   - 5-minute timeout protection for long-running scans
+  - Proper exit code handling (vulnix/trivy return non-zero when CVEs found)
+  - JSON validation before accepting scan results
   - Installation instructions provided when tools are missing
 
 ### Changed
+- **Root Privilege Enforcement**: Audit command now requires root privileges
+  - Script exits with error if not run with sudo
+  - Clear error message with usage instructions
+  - Removed redundant sudo calls within script
+
+- **Improved Output Naming**: Output directories now use hostname-user-date format
+  - Format: `output-{hostname}-{user}-{date}`
+  - Preserves original username when using sudo (via SUDO_USER variable)
+  - Tarball naming follows same pattern: `honeybadger-{hostname}-{user}-{date}.tar.gz`
+
 - **JSON-based System Information**: Replaced neofetch.txt with neofetch.json for structured data access
   - Uses jq for reliable JSON parsing instead of brittle grep/sed text parsing
   - Backward compatibility maintained for existing audit archives with neofetch.txt
   - Improved data extraction reliability for OS info, hardware details, and package detection
+
+### Security
+- **Root Check**: Audit now validates root privileges before execution
+- **CVE Detection**: Proactive vulnerability identification in installed packages
+- **Centralized Monitoring**: Optional server submission for organization-wide compliance tracking
 
 ## 0.2.0 - ISO27001 Compliance Enhancement (February 2026)
 
