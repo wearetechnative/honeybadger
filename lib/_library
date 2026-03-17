@@ -1092,20 +1092,31 @@ scan_vulnix() {
     echo "Running vulnix scan on NixOS system..."
 
     # Run vulnix with timeout (5 minutes)
-    if timeout 300 vulnix --json /run/current-system > "$output_file" 2>&1; then
-        echo "✓ CVE scan completed: $output_file"
-        return 0
-    else
-        local exit_code=$?
-        if [[ $exit_code -eq 124 ]]; then
-            echo "⚠ CVE scan timeout (5 minutes exceeded), scan incomplete"
-        else
-            echo "⚠ CVE scan failed with exit code $exit_code"
+    # Note: vulnix returns exit code 2 when vulnerabilities are found
+    timeout 300 vulnix --json /run/current-system > "$output_file" 2>&1
+    local exit_code=$?
+
+    # Check if output file was created and is valid JSON
+    if [[ -f "$output_file" ]] && [[ -s "$output_file" ]]; then
+        # Verify it's valid JSON
+        if jq empty "$output_file" >/dev/null 2>&1; then
+            echo "✓ CVE scan completed: $output_file"
+            if [[ $exit_code -eq 2 ]]; then
+                echo "  (vulnerabilities detected)"
+            fi
+            return 0
         fi
-        # Remove incomplete output
-        rm -f "$output_file"
-        return 1
     fi
+
+    # Scan failed or timed out
+    if [[ $exit_code -eq 124 ]]; then
+        echo "⚠ CVE scan timeout (5 minutes exceeded), scan incomplete"
+    else
+        echo "⚠ CVE scan failed with exit code $exit_code"
+    fi
+    # Remove incomplete output
+    rm -f "$output_file"
+    return 1
 }
 
 # Scan filesystem with trivy
@@ -1130,20 +1141,31 @@ scan_trivy() {
     # --scanners vuln: Only scan for vulnerabilities (not misconfigs or secrets)
     # --format json: Output JSON format
     # --quiet: Suppress progress output
-    if timeout 300 trivy rootfs --format json --scanners vuln --quiet / > "$output_file" 2>&1; then
-        echo "✓ CVE scan completed: $output_file"
-        return 0
-    else
-        local exit_code=$?
-        if [[ $exit_code -eq 124 ]]; then
-            echo "⚠ CVE scan timeout (5 minutes exceeded), scan incomplete"
-        else
-            echo "⚠ CVE scan failed with exit code $exit_code"
+    # Note: trivy may return non-zero exit code when vulnerabilities are found
+    timeout 300 trivy rootfs --format json --scanners vuln --quiet / > "$output_file" 2>&1
+    local exit_code=$?
+
+    # Check if output file was created and is valid JSON
+    if [[ -f "$output_file" ]] && [[ -s "$output_file" ]]; then
+        # Verify it's valid JSON
+        if jq empty "$output_file" >/dev/null 2>&1; then
+            echo "✓ CVE scan completed: $output_file"
+            if [[ $exit_code -ne 0 ]] && [[ $exit_code -ne 124 ]]; then
+                echo "  (vulnerabilities may have been detected)"
+            fi
+            return 0
         fi
-        # Remove incomplete output
-        rm -f "$output_file"
-        return 1
     fi
+
+    # Scan failed or timed out
+    if [[ $exit_code -eq 124 ]]; then
+        echo "⚠ CVE scan timeout (5 minutes exceeded), scan incomplete"
+    else
+        echo "⚠ CVE scan failed with exit code $exit_code"
+    fi
+    # Remove incomplete output
+    rm -f "$output_file"
+    return 1
 }
 
 # Generate CVE summary report from scan results
@@ -1274,4 +1296,238 @@ generate_trivy_summary() {
     } > "$output_file"
 
     echo "✓ CVE summary generated: $output_file"
+}
+
+# ==============================================================================
+# Server Report Submission Functions
+# ==============================================================================
+
+# Load server configuration from config file
+# Checks in order: ./.honeybadger.conf, ~/.honeybadger.conf, /etc/honeybadger.conf
+load_server_config() {
+    # Default values
+    SERVER_ENABLED="${SERVER_ENABLED:-false}"
+    SERVER_URL="${SERVER_URL:-http://localhost:7123/}"
+    SERVER_TIMEOUT="${SERVER_TIMEOUT:-30}"
+    SERVER_RETRY_COUNT="${SERVER_RETRY_COUNT:-3}"
+    DRY_RUN="${DRY_RUN:-false}"
+
+    # Check config files in order
+    local config_files=(
+        "./.honeybadger.conf"
+        "$HOME/.honeybadger.conf"
+        "/etc/honeybadger.conf"
+    )
+
+    for config_file in "${config_files[@]}"; do
+        if [[ -f "$config_file" ]]; then
+            echo "Loading configuration from: $config_file"
+            # Source the config file safely
+            # shellcheck disable=SC1090
+            source "$config_file"
+            return 0
+        fi
+    done
+
+    echo "No configuration file found, using defaults"
+    echo "  SERVER_ENABLED=$SERVER_ENABLED"
+    echo "  SERVER_URL=$SERVER_URL"
+    return 0
+}
+
+# Find the most recent output-* directory
+find_latest_output_dir() {
+    local latest_dir
+    latest_dir=$(ls -dt output-* 2>/dev/null | head -n 1)
+
+    if [[ -z "$latest_dir" ]]; then
+        echo "ERROR: No output-* directories found" >&2
+        return 1
+    fi
+
+    echo "$latest_dir"
+    return 0
+}
+
+# Submit a single report to the server
+# Usage: submit_report <report_file> <report_type>
+submit_report() {
+    local report_file="$1"
+    local report_type="$2"
+
+    # Check if file exists
+    if [[ ! -f "$report_file" ]]; then
+        echo "ℹ Skipping $report_type: file not found ($report_file)"
+        return 0
+    fi
+
+    # Auto-detect system identity
+    local hostname
+    hostname=$(hostname -s)
+    local username
+    username="${SUDO_USER:-$(whoami)}"
+
+    # Build curl command
+    local curl_cmd=(
+        curl
+        -X POST
+        "$SERVER_URL"
+        -H "Content-Type: application/json"
+        -H "X-Hostname: $hostname"
+        -H "X-Username: $username"
+        -H "X-Report-Type: $report_type"
+        --max-time "$SERVER_TIMEOUT"
+        --silent
+        --show-error
+        --write-out "%{http_code}"
+        --output /dev/null
+        --data-binary "@$report_file"
+    )
+
+    # Dry-run mode
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "DRY-RUN: Would submit $report_type report"
+        echo "  File: $report_file"
+        echo "  Server: $SERVER_URL"
+        echo "  Headers: X-Hostname=$hostname, X-Username=$username, X-Report-Type=$report_type"
+        echo "  Command: ${curl_cmd[*]}"
+        return 0
+    fi
+
+    # Retry logic with exponential backoff
+    local attempt=1
+    local max_attempts=$SERVER_RETRY_COUNT
+
+    while [[ $attempt -le $max_attempts ]]; do
+        echo "Submitting $report_type report (attempt $attempt/$max_attempts)..."
+
+        local http_code
+        http_code=$("${curl_cmd[@]}" 2>&1)
+        local curl_exit=$?
+
+        # Check HTTP response
+        if [[ $curl_exit -eq 0 && "$http_code" == "200" ]]; then
+            echo "✓ Successfully submitted $report_type report"
+            return 0
+        fi
+
+        # Handle client errors (don't retry)
+        if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+            echo "✗ Failed to submit $report_type: HTTP $http_code (client error, not retrying)"
+            return 1
+        fi
+
+        # Log failure and retry if attempts remaining
+        if [[ $attempt -lt $max_attempts ]]; then
+            local delay=$((2 ** (attempt - 1)))  # Exponential backoff: 1s, 2s, 4s
+            echo "  Failed (HTTP $http_code, curl exit $curl_exit), retrying in ${delay}s..."
+            sleep "$delay"
+        else
+            echo "✗ Failed to submit $report_type after $max_attempts attempts (HTTP $http_code, curl exit $curl_exit)"
+            return 1
+        fi
+
+        ((attempt++))
+    done
+
+    return 1
+}
+
+# Submit all available reports from output directory
+# Usage: submit_all_reports <output_dir>
+submit_all_reports() {
+    local output_dir="$1"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Output directory does not exist: $output_dir" >&2
+        return 1
+    fi
+
+    echo "======================================"
+    echo "Submitting reports from: $output_dir"
+    echo "======================================"
+    echo ""
+
+    # Load configuration
+    load_server_config
+    echo ""
+
+    # Check if submission is enabled
+    if [[ "$SERVER_ENABLED" != "true" ]]; then
+        echo "Server submission is disabled (SERVER_ENABLED=false)"
+        echo "To enable, set SERVER_ENABLED=true in configuration file"
+        return 1
+    fi
+
+    # Track submission results
+    local success_count=0
+    local fail_count=0
+    local reports_submitted=()
+    local reports_failed=()
+
+    # Submit neofetch report
+    if submit_report "$output_dir/neofetch.json" "neofetch"; then
+        ((success_count++))
+        reports_submitted+=("neofetch")
+    else
+        ((fail_count++))
+        reports_failed+=("neofetch")
+    fi
+    echo ""
+
+    # Submit lynis report
+    if submit_report "$output_dir/lynis-report.json" "lynis"; then
+        ((success_count++))
+        reports_submitted+=("lynis")
+    else
+        ((fail_count++))
+        reports_failed+=("lynis")
+    fi
+    echo ""
+
+    # Submit CVE scan report (vulnix or trivy)
+    if [[ -f "$output_dir/vulnix.json" ]]; then
+        if submit_report "$output_dir/vulnix.json" "vulnix"; then
+            ((success_count++))
+            reports_submitted+=("vulnix")
+        else
+            ((fail_count++))
+            reports_failed+=("vulnix")
+        fi
+    elif [[ -f "$output_dir/trivy.json" ]]; then
+        if submit_report "$output_dir/trivy.json" "trivy"; then
+            ((success_count++))
+            reports_submitted+=("trivy")
+        else
+            ((fail_count++))
+            reports_failed+=("trivy")
+        fi
+    else
+        echo "ℹ No CVE scan report found (vulnix.json or trivy.json)"
+    fi
+    echo ""
+
+    # Print summary
+    echo "======================================"
+    echo "Submission Summary"
+    echo "======================================"
+    echo "Successful: $success_count"
+    if [[ ${#reports_submitted[@]} -gt 0 ]]; then
+        printf '  - %s\n' "${reports_submitted[@]}"
+    fi
+    echo ""
+    echo "Failed: $fail_count"
+    if [[ ${#reports_failed[@]} -gt 0 ]]; then
+        printf '  - %s\n' "${reports_failed[@]}"
+    fi
+    echo ""
+
+    # Exit with appropriate code
+    if [[ $success_count -gt 0 ]]; then
+        echo "At least one report submitted successfully"
+        return 0
+    else
+        echo "All submissions failed"
+        return 1
+    fi
 }

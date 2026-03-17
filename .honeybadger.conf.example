@@ -1,0 +1,23 @@
+# Honeybadger Server Configuration
+# Copy this file to .honeybadger.conf, ~/.honeybadger.conf, or /etc/honeybadger.conf
+
+# Enable/disable server submission (default: false)
+SERVER_ENABLED=false
+
+# Server URL (default: http://localhost:7123/)
+SERVER_URL=http://localhost:7123/
+
+# Connection timeout in seconds (default: 30)
+SERVER_TIMEOUT=30
+
+# Number of retry attempts on network failures (default: 3)
+SERVER_RETRY_COUNT=3
+
+# Dry-run mode: log what would be submitted without actual HTTP requests (default: false)
+DRY_RUN=false
+
+# Note: Configuration files are checked in this order:
+#   1. ./.honeybadger.conf (current directory)
+#   2. ~/.honeybadger.conf (user home directory)
+#   3. /etc/honeybadger.conf (system-wide)
+# The first file found will be used.
