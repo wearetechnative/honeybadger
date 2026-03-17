@@ -13,12 +13,12 @@ Install the required dependencies:
 - **Docker**: Container runtime (required)
 - **Lynis**: Security auditing tool (required)
 - **neofetch**: System information display (required)
+- **jq**: JSON processor (required)
+- **curl**: HTTP client for API calls (required)
 - **tar, sed**: Standard Unix utilities (usually pre-installed)
-
-Optional dependencies for CVE vulnerability scanning:
-
-- **vulnix**: CVE scanner for NixOS (optional, NixOS only)
-- **trivy**: CVE scanner for Arch/Ubuntu/Kali/macOS (optional)
+- **CVE Scanner** (required, OS-specific):
+  - **vulnix**: For NixOS systems (required)
+  - **trivy**: For Arch/Ubuntu/Kali/macOS (required)
 
 #### Installing Lynis
 
@@ -51,9 +51,9 @@ sudo ./lynis audit system
 
 To ensure you have the latest version, check https://github.com/CISOfy/lynis for updates.
 
-#### Installing CVE Scanners (Optional)
+#### Installing CVE Scanners (Required)
 
-For CVE vulnerability scanning support, install the appropriate tool for your system:
+CVE vulnerability scanning is required for complete security audits. Install the appropriate tool for your system:
 
 **NixOS (vulnix):**
 ```bash
@@ -80,7 +80,7 @@ sudo pacman -S trivy
 brew install trivy
 ```
 
-Note: CVE scanning is optional. If the scanner is not installed, the audit will skip CVE scanning and continue with other checks.
+**Note**: CVE scanning is required. The audit will check at startup if the appropriate CVE scanner is installed (vulnix for NixOS, trivy for others) and will exit with an error if the scanner is missing. You must install the appropriate scanner before running the audit.
 
 ## Usage on Linux and macOS
 

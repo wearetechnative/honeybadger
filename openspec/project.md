@@ -320,6 +320,9 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
 ### RUNME.sh Commands
 - **audit**: Run full security audit and generate report (Usage: `sudo ./RUNME.sh audit`)
   - **Requires root privileges** - script will exit with error if not run with sudo
+  - **Dependency checks at startup**:
+    - Required: lynis, docker, neofetch, jq, curl, tar, sed (exits if missing)
+    - Required CVE scanners: vulnix (NixOS) or trivy (others) - exits if missing
   - Performs Lynis security audit
   - Converts Lynis report to JSON using Docker
   - Collects system information (neofetch, packages, block devices, screen lock)
@@ -391,8 +394,13 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
 - **lynis**: https://github.com/CISOfy/lynis - Security auditing tool
 - **docker**: Container runtime for report conversion
 - **neofetch**: https://github.com/dylanaraps/neofetch - System info display
+- **jq**: JSON processor for parsing and processing JSON reports
+- **curl**: HTTP client for fetching OS release information from APIs
 - **tar**: Archive creation
 - **sed**: Text processing
+- **CVE Scanners** (OS-specific, required):
+  - **vulnix**: https://github.com/flyingcircusio/vulnix - CVE scanner for NixOS (install: `nix-env -iA nixpkgs.vulnix`)
+  - **trivy**: https://aquasecurity.github.io/trivy/ - CVE scanner for Arch/Ubuntu/Kali/macOS
 
 ### Docker Image Components
 Built from `debian:latest` with:
@@ -423,11 +431,6 @@ Built from `debian:latest` with:
 - **gsettings**: GNOME desktop settings
 - **xfconf-query**: XFCE configuration query
 - **kreadconfig5/6**: KDE configuration reader
-- **vulnix**: CVE vulnerability scanner for NixOS (install: `nix-env -iA nixpkgs.vulnix`)
-- **trivy**: CVE vulnerability scanner for Arch/Ubuntu/Kali/macOS
-  - Ubuntu/Debian: https://aquasecurity.github.io/trivy/latest/getting-started/installation/
-  - Arch Linux: `yay -S trivy` or `pacman -S trivy`
-  - macOS: `brew install trivy`
 
 Note: wkhtmltopdf, pandoc, and jq are NOT required on the host system as they are available in the Docker container.
 

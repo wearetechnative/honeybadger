@@ -90,12 +90,21 @@ audit(){
 
  show_version
  checkOS
- #checkdeps "jq"
  checkdeps "lynis" "https://github.com/CISOfy/lynis"
  checkdeps "docker"
  checkdeps "sed"
  checkdeps "neofetch" "https://github.com/dylanaraps/neofetch"
  checkdeps "tar"
+ checkdeps "jq"
+ checkdeps "curl"
+
+ # Check for OS-specific CVE scanner (required)
+ if [[ -f /etc/nixos/configuration.nix ]]; then
+   checkdeps "vulnix" "https://github.com/flyingcircusio/vulnix"
+ else
+   checkdeps "trivy" "https://aquasecurity.github.io/trivy/"
+ fi
+
  deps_missing
 
  # Use SUDO_USER if running with sudo, otherwise use current user
@@ -129,7 +138,8 @@ audit(){
    --read-only \
    -v /var/log/lynis-report.dat:/data/lynis-report.dat:ro \
    "$image_name" 2>/dev/null > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
- neofetch --off --stdout | jq -Rn '
+ # Run neofetch as actual user (not root) to capture correct username
+ sudo -u "${SUDO_USER:-$(whoami)}" neofetch --off --stdout | jq -Rn '
    ([inputs | select(length>0)] |
     (.[0] | capture("^(?<user>[^@]+)@(?<hostname>\\S+)") // {}) +
     (.[1:] | map(select(contains(":"))) | map(capture("(?<key>[^:]+): (?<value>.*)")) | map({(.key|ascii_downcase|gsub(" "; "_")): .value}) | add // {})
