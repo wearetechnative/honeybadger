@@ -1,5 +1,39 @@
 # Changelog HoneyBadger
 
+## 0.5.0 - Remove CVE Scanning (March 2026)
+
+### Breaking Changes
+
+#### CVE Vulnerability Scanning Removed
+- **CVE vulnerability scanning has been removed** as the functionality was determined to be obsolete
+  - Removed vulnix scanner support (NixOS)
+  - Removed trivy scanner support (other Linux distributions)
+  - Audit no longer checks for CVE scanners at startup
+  - Output files no longer include:
+    - `vulnix.json` - CVE scan results from vulnix
+    - `trivy.json` - CVE scan results from trivy
+    - `cve-summary.txt` - Human-readable CVE summary report
+  - Server submission no longer includes CVE scan reports
+  - **Note**: Organizations requiring CVE scanning for ISO27001 Policy 8.1 compliance must implement alternative vulnerability assessment solutions
+
+### Removed
+
+#### Code Removal
+- Removed 6 CVE scanning functions from `lib/_library` (~255 lines):
+  - `scan_cve_vulnerabilities()` - Main CVE scanning orchestrator
+  - `scan_vulnix()` - NixOS vulnerability scanner
+  - `scan_trivy()` - General Linux vulnerability scanner
+  - `generate_cve_summary()` - Summary report generator
+  - `generate_vulnix_summary()` - Vulnix report formatter
+  - `generate_trivy_summary()` - Trivy report formatter
+- Removed CVE scanner dependency checks from audit startup
+- Removed CVE report submission from `submit_all_reports()`
+
+#### Documentation Updates
+- Removed CVE scanner installation instructions from README
+- Removed vulnix and trivy from required dependencies list
+- Updated project documentation to remove CVE scanning references
+
 ## 0.4.1 - Output Ownership Fix (March 2026)
 
 ### Fixed

@@ -132,79 +132,7 @@ checkAntivirusStatus
 
 ---
 
-## Aanbeveling 2: CVE Database Checking voor Self-Hosted Software (Policy 8.1)
-
-### Doel
-Controleer self-hosted software op bekende CVE vulnerabilities via geautomatiseerde database queries.
-
-### Implementatie Opties
-
-#### Optie A: Grype (Aanbevolen) ⭐
-**Voordeel**: Gratis, open-source, offline database, snelle scans
-
-```bash
-function checkCVEVulnerabilities {
-  echo "=== CVE VULNERABILITY SCAN ===" > $output/cve-vulnerabilities.json
-
-  # Install grype if not present (one-time)
-  if ! command -v grype >/dev/null 2>&1; then
-    echo "Installing Grype vulnerability scanner..."
-    curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-  fi
-
-  # Scan installed packages
-  echo "Scanning system packages for CVE vulnerabilities..."
-  grype dir:/ --scope all-layers -o json > $output/cve-vulnerabilities.json 2>&1
-
-  # Generate summary
-  critical_count=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' $output/cve-vulnerabilities.json)
-  high_count=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' $output/cve-vulnerabilities.json)
-
-  echo "=== CVE SCAN SUMMARY ===" > $output/cve-summary.txt
-  echo "Critical vulnerabilities: $critical_count" >> $output/cve-summary.txt
-  echo "High vulnerabilities: $high_count" >> $output/cve-summary.txt
-
-  if [ "$critical_count" -gt 0 ] || [ "$high_count" -gt 0 ]; then
-    echo "STATUS: ACTION REQUIRED - Critical/High CVEs found" >> $output/cve-summary.txt
-  else
-    echo "STATUS: OK - No critical vulnerabilities detected" >> $output/cve-summary.txt
-  fi
-}
-```
-
-**Dependencies**:
-- Grype: https://github.com/anchore/grype
-- jq (already used in project)
-
-**Workload**: 6 uur (implementatie, testing, documentatie)
-
-#### Optie B: Trivy (Alternatief)
-Vergelijkbaar met Grype, ook uitstekende CVE database coverage.
-
-```bash
-# Similar implementation with trivy
-trivy rootfs --format json --output $output/cve-vulnerabilities.json /
-```
-
-#### Optie C: OWASP Dependency-Check
-Meer gericht op application dependencies (Java, .NET, Python, etc.)
-
-### Docker Container Scanning (Bonus)
-Voeg ook Docker container vulnerability scanning toe:
-
-```bash
-# Scan all running containers
-docker ps --format "{{.Names}}" | while read container; do
-  echo "Scanning container: $container"
-  grype docker:$container -o json > $output/cve-docker-$container.json
-done
-```
-
-**Workload**: +2 uur extra
-
----
-
-## Aanbeveling 3: Wekelijkse Automatische Scheduling
+## Aanbeveling 2: Wekelijkse Automatische Scheduling
 
 ### Doel
 Automatiseer wekelijkse Honeybadger audits conform policy vereisten.
@@ -336,7 +264,7 @@ function sendReport {
 
 ---
 
-## Aanbeveling 4: Compliance Reporting Dashboard
+## Aanbeveling 3: Compliance Reporting Dashboard
 
 ### Doel
 Genereer gestructureerde compliance rapportage die direct aansluit bij policy secties.
@@ -405,7 +333,7 @@ bash generate-compliance-report.sh $output
 
 ---
 
-## Aanbeveling 5: Elastiscan Integratie (Optioneel)
+## Aanbeveling 4: Elastiscan Integratie (Optioneel)
 
 ### Context
 Genoemd in requirements: "Elastiscan: 2 wkn met doorlooptijd 4 wkn"

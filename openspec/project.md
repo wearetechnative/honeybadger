@@ -18,7 +18,6 @@ thoroughly auditing device security configurations.
 - ✅ **Warnings/Suggestions Report**: Filtered security issues with HTML/PDF output via Docker
 - ✅ **Library Architecture**: Modular, reusable functions in _library file
 - ✅ **Docker-based PDF Generation**: wkhtmltopdf in container for reliable cross-platform PDF creation
-- ✅ **CVE Vulnerability Scanning**: Optional CVE scanning with vulnix (NixOS) or trivy (Arch/Ubuntu/Kali/macOS)
 - ✅ **Server Report Submission**: Optional centralized reporting via HTTP POST to honeybadger-server
 
 ### In Production
@@ -132,20 +131,6 @@ thoroughly auditing device security configurations.
   - Converts HTML to PDF using Docker + wkhtmltopdf
   - Attempts to fix ownership of root-created PDF files
 
-#### CVE Vulnerability Scanning
-- `scan_cve_vulnerabilities()`: Scan for CVE vulnerabilities using OS-specific tools
-  - Uses vulnix on NixOS (scans /run/current-system)
-  - Uses trivy on Arch/Ubuntu/Kali/macOS (scans filesystem and OS packages)
-  - Generates JSON output with vulnerability details
-  - Handles exit code 2 from scanners (vulnerabilities found, not error)
-  - 300-second timeout for large scans
-  - Validates JSON output before accepting results
-- `generate_cve_summary()`: Create human-readable CVE summary report
-  - Parses JSON from vulnix or trivy
-  - Counts vulnerabilities by severity (Critical, High, Medium, Low)
-  - Generates actionable recommendations based on findings
-  - Separate summary generators for vulnix and trivy formats
-
 #### Server Report Submission
 - `load_server_config()`: Load configuration from .honeybadger.conf files
   - Checks: ./.honeybadger.conf, ~/.honeybadger.conf, /etc/honeybadger.conf
@@ -162,7 +147,7 @@ thoroughly auditing device security configurations.
   - Retries on server errors (5xx) and network failures
   - Supports dry-run mode (logs without submitting)
 - `submit_all_reports()`: Submit all reports from output directory
-  - Submits neofetch.json, lynis-report.json, vulnix.json/trivy.json
+  - Submits neofetch.json, lynis-report.json
   - Tracks success/failure counts
   - Generates submission summary
   - Returns 0 if at least one report succeeded, 1 if all failed
@@ -313,24 +298,18 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
   - screenlock-info.txt: Screen lock settings
   - installed-packages.txt: Package inventory
   - lsb_release.txt: Distribution info (if available)
-  - vulnix.json: CVE vulnerability scan results (NixOS only, if vulnix installed)
-  - trivy.json: CVE vulnerability scan results (Arch/Ubuntu/Kali/macOS, if trivy installed)
-  - cve-summary.txt: Human-readable CVE summary with severity counts
 
 ### RUNME.sh Commands
 - **audit**: Run full security audit and generate report (Usage: `sudo ./RUNME.sh audit`)
   - **Requires root privileges** - script will exit with error if not run with sudo
   - **Dependency checks at startup**:
     - Required: lynis, docker, neofetch, jq, curl, tar, sed (exits if missing)
-    - Required CVE scanners: vulnix (NixOS) or trivy (others) - exits if missing
   - Performs Lynis security audit
   - Converts Lynis report to JSON using Docker
   - Collects system information (neofetch, packages, block devices, screen lock)
-  - Scans for CVE vulnerabilities (vulnix on NixOS, trivy on others - optional)
   - Generates OS/kernel status report with PASS/FAIL verdict
   - Generates asset inventory table
   - Generates filtered warnings/suggestions report (HTML/PDF via Docker)
-  - Generates CVE summary report (if vulnerability scan completed)
   - Creates compressed tarball with all reports
 
 - **check-output** `<directory|tarball.tar.gz|tarball.tar>`: Re-analyze existing audit output
@@ -380,7 +359,7 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
     - SERVER_TIMEOUT: Connection timeout in seconds (default: 30)
     - SERVER_RETRY_COUNT: Number of retry attempts (default: 3)
     - DRY_RUN: Test mode without actual HTTP requests (default: false)
-  - Submits JSON reports: neofetch.json, lynis-report.json, vulnix.json/trivy.json
+  - Submits JSON reports: neofetch.json, lynis-report.json
   - HTTP POST with headers: X-Hostname, X-Username, X-Report-Type
   - Retry logic with exponential backoff (1s, 2s, 4s)
   - Fails gracefully if server unavailable
@@ -398,9 +377,6 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
 - **curl**: HTTP client for fetching OS release information from APIs
 - **tar**: Archive creation
 - **sed**: Text processing
-- **CVE Scanners** (OS-specific, required):
-  - **vulnix**: https://github.com/flyingcircusio/vulnix - CVE scanner for NixOS (install: `nix-env -iA nixpkgs.vulnix`)
-  - **trivy**: https://aquasecurity.github.io/trivy/ - CVE scanner for Arch/Ubuntu/Kali/macOS
 
 ### Docker Image Components
 Built from `debian:latest` with:

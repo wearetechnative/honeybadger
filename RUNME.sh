@@ -98,13 +98,6 @@ audit(){
  checkdeps "jq"
  checkdeps "curl"
 
- # Check for OS-specific CVE scanner (required)
- if [[ -f /etc/nixos/configuration.nix ]]; then
-   checkdeps "vulnix" "https://github.com/flyingcircusio/vulnix"
- else
-   checkdeps "trivy" "https://aquasecurity.github.io/trivy/"
- fi
-
  deps_missing
 
  # Use SUDO_USER if running with sudo, otherwise use current user
@@ -198,11 +191,6 @@ audit(){
      fi
    } > "$output/installed-packages.txt" 2>&1
  fi
-
- # CVE Vulnerability Scanning
- echo "Scanning for CVE vulnerabilities..."
- scan_cve_vulnerabilities "$output"
- generate_cve_summary "$output"
 
  # Check for screen lock tools
  echo "Checking screen lock tools..."

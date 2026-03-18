@@ -16,9 +16,6 @@ Install the required dependencies:
 - **jq**: JSON processor (required)
 - **curl**: HTTP client for API calls (required)
 - **tar, sed**: Standard Unix utilities (usually pre-installed)
-- **CVE Scanner** (required, OS-specific):
-  - **vulnix**: For NixOS systems (required)
-  - **trivy**: For Arch/Ubuntu/Kali/macOS (required)
 
 #### Installing Lynis
 
@@ -50,37 +47,6 @@ sudo ./lynis audit system
 ```
 
 To ensure you have the latest version, check https://github.com/CISOfy/lynis for updates.
-
-#### Installing CVE Scanners (Required)
-
-CVE vulnerability scanning is required for complete security audits. Install the appropriate tool for your system:
-
-**NixOS (vulnix):**
-```bash
-nix-env -iA nixpkgs.vulnix
-```
-
-**Ubuntu/Debian (trivy):**
-```bash
-wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-sudo apt update
-sudo apt install trivy
-```
-
-**Arch Linux (trivy):**
-```bash
-yay -S trivy
-# or
-sudo pacman -S trivy
-```
-
-**macOS (trivy):**
-```bash
-brew install trivy
-```
-
-**Note**: CVE scanning is required. The audit will check at startup if the appropriate CVE scanner is installed (vulnix for NixOS, trivy for others) and will exit with an error if the scanner is missing. You must install the appropriate scanner before running the audit.
 
 ## Usage on Linux and macOS
 
