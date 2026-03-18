@@ -426,6 +426,13 @@ audit(){
  fi
 
  tar czf $tarball $output
+
+# Fix ownership when running with sudo (tarball and output should belong to actual user, not root)
+if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
+  user_group=$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")
+  chown -R "$SUDO_USER:$user_group" "$output" 2>/dev/null || true
+  chown "$SUDO_USER:$user_group" "$tarball" 2>/dev/null || true
+fi
 }
 
 make_command "submit" "Submit audit reports to honeybadger-server"

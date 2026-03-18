@@ -1,5 +1,20 @@
 # Changelog HoneyBadger
 
+## 0.4.1 - Output Ownership Fix (March 2026)
+
+### Fixed
+
+#### Tarball and Output Directory Ownership
+- **Fixed**: Audit output files now owned by actual user instead of root
+  - Previously: Running `sudo ./RUNME.sh audit` created root-owned tarball and output directory
+  - Now: Files are owned by the user who invoked sudo (e.g., `wtoorren:users`)
+  - Uses `chown` with `SUDO_USER` environment variable after tar creation
+  - Graceful handling when running without sudo (ownership already correct)
+  - Users can now delete audit results without needing sudo:
+    - Tarball: `honeybadger-hostname-user-date.tar.gz` ✓
+    - Output directory: `output-hostname-user-date/` ✓
+  - Improved user experience: files belong to user, not system
+
 ## 0.4.0 - Required Dependencies & Bug Fixes (March 2026)
 
 ### Breaking Changes
