@@ -15,7 +15,10 @@ Install the required dependencies:
 - **neofetch**: System information display (required)
 - **jq**: JSON processor (required)
 - **curl**: HTTP client for API calls (required)
+- **dmidecode**: Hardware information tool (recommended for serial number collection)
 - **tar, sed**: Standard Unix utilities (usually pre-installed)
+
+**Note:** `dmidecode` is recommended for hardware serial number collection but not required. On virtual machines or if dmidecode is unavailable, the serial number field will show "Not available".
 
 #### Installing Lynis
 
@@ -59,6 +62,57 @@ sudo ./RUNME.sh audit
 ```
 
 **Note:** The audit requires root privileges to perform a complete system security scan. The script will not run without sudo.
+
+## What Gets Audited
+
+Honeybadger performs a comprehensive security audit and collects the following information:
+
+### Hardware & System Information
+- **Device Serial Number** - Collected via dmidecode for hardware asset tracking
+- **Hostname** - System identification
+- **Model/Description** - Hardware model information
+- **Operating System** - OS type, version, and kernel information
+- **NixOS Metadata** (NixOS only) - Nixpkgs commit hash, system generation, last rebuild date
+
+### Security Controls
+- **Disk Encryption** - LUKS/dm-crypt detection
+- **Screen Lock** - Auto-lock configuration for GNOME, KDE, Hyprland, Sway
+- **OS Update Status** - Last update date, available updates, EOL checking
+- **Firewall Status** - Active firewall detection
+- **Malware Scanner** - Antivirus/scanner presence
+
+### Compliance Metrics
+- **Lynis Hardening Score** - Security hardening rating (0-100)
+  - **Compliance Threshold: ≥65** - Systems must score 65 or higher to be compliant
+  - Scores are categorized: Excellent (80-100), Good (60-79), Fair (40-59), Poor (0-39)
+- **Security Findings** - Categorized by severity: Critical, High, Medium, Low
+- **Package Information** - Installed software inventory
+
+### Output Files
+
+The audit generates the following reports in `output-<hostname>-<user>-<date>/`:
+
+- `asset-inventory.txt` - Summary of all collected information with compliance status
+- `lynis-report.json` - Detailed Lynis security audit data
+- `lynis-report-warnings_fails.html` - HTML report with color-coded security findings
+- `os-kernel-status.txt` - Operating system EOL status and recommendations
+- `os-update-history.txt` - OS update history and last update date
+- `hardware-serial.txt` - Device serial number
+- `nixos-system-info.txt` - NixOS-specific metadata (NixOS only)
+- `screenlock-info.txt` - Screen lock configuration details
+- `blockdevices.txt` - Disk encryption information
+- `installed-packages.txt` - Complete package listing
+
+## ISO27001 Compliance Requirements
+
+**Minimum Requirements:**
+- ✅ Lynis Hardening Score ≥ 65
+- ✅ Disk encryption enabled (LUKS or equivalent)
+- ✅ Screen lock configured with auto-lock ≤15 minutes
+- ✅ OS on supported version (not EOL)
+- ✅ Regular updates (within 30 days)
+
+Systems failing these requirements will be flagged in the `asset-inventory.txt` report with ❌ indicators.
 
 ## Usage on Windows
 

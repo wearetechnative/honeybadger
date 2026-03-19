@@ -1,5 +1,109 @@
 # Changelog HoneyBadger
 
+## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
+
+### Added
+
+#### Hardware Asset Tracking
+- **Device Serial Number Collection** - Collects hardware serial numbers via dmidecode
+  - Automatically retrieves serial number during audit
+  - Graceful fallback for VMs or systems without dmidecode
+  - Separate "Serial Number" and "Model" fields in asset inventory
+  - Output file: `hardware-serial.txt`
+
+#### OS Update History Tracking
+- **Update History Integration** - Tracks OS update status and compliance
+  - Integrated existing `lib/check-os-updates.sh` into audit workflow
+  - Reports last update date for Arch, Ubuntu, Debian, Kali, Fedora, NixOS, macOS
+  - Compliance indicators: ✅ COMPLIANT (<14 days), ⚠️ UPDATE RECOMMENDED (14-30 days), ❌ UPDATE REQUIRED (>30 days)
+  - Output file: `os-update-history.txt`
+
+#### Lynis Hardening Score Display
+- **Hardening Score Reporting** - Displays Lynis security hardening score in reports
+  - Extracts `.hardening_index` (0-100 scale) from Lynis JSON
+  - Status indicators: Excellent (80-100), Good (60-79), Fair (40-59), Poor (0-39)
+  - Shown in `asset-inventory.txt` with compliance status
+
+#### Lynis Hardening Score Validation
+- **Compliance Threshold Checking** - Validates minimum hardening score requirement
+  - **Configurable threshold: MIN_HARDENING_SCORE=65** (can be adjusted in code)
+  - Compliant: `78/100 (Good) ✅ COMPLIANT (≥65)`
+  - Non-compliant: `58/100 (Fair) ❌ NON-COMPLIANT (required: ≥65)`
+  - Clear pass/fail indicators for policy compliance
+
+#### NixOS Metadata Collection
+- **NixOS System Information** - Collects NixOS-specific reproducibility data
+  - Nixpkgs commit hash (short form, 7-8 characters)
+  - Current system generation number
+  - Last rebuild date and timestamp
+  - Recent generation history (last 5 generations)
+  - Output file: `nixos-system-info.txt`
+  - Conditional fields in `asset-inventory.txt` (NixOS only)
+
+#### Security Finding Severity Categorization
+- **Severity-Based Lynis Findings** - Categorizes security findings by priority
+  - Keyword-based heuristic categorization: Critical, High, Medium, Low, Unspecified
+  - HTML report restructured with severity sections:
+    - 🔴 **CRITICAL FINDINGS** (red) - Root access, authentication, encryption issues
+    - 🟠 **High Priority** (orange) - Security controls, permissions, credentials
+    - 🟡 **Medium Priority** (yellow) - Updates, patches, configuration warnings
+    - 🔵 **Low Priority** (blue) - Optional improvements and suggestions
+    - ⚪ **Other Findings** (gray) - Unclassified items
+  - Summary shows counts per severity: "2 critical, 5 high, 12 medium findings"
+  - Color-coded severity badges on each finding
+  - Automatic categorization when Lynis doesn't provide severity data
+
+### Changed
+
+#### Asset Inventory Report
+- Separated "Serial Number / Model" into two distinct fields
+- Added "Lynis Hardening Score" field with compliance indicators
+- Added conditional "NixOS Commit Hash" and "NixOS Generation" fields for NixOS systems
+- Updated notes section
+
+#### HTML Warnings Report
+- Completely restructured to group findings by severity
+- Added severity badge CSS styling (critical: red, high: orange, medium: yellow, low: blue, unspecified: gray)
+- Enhanced summary section with per-severity counts
+- Improved visual hierarchy with color-coded sections
+
+### Documentation
+
+#### README.md
+- Added dmidecode to dependencies (recommended, not required)
+- New "What Gets Audited" section documenting all collected information
+- New "ISO27001 Compliance Requirements" section with minimum thresholds
+- Documented new output files (hardware-serial.txt, os-update-history.txt, nixos-system-info.txt)
+- Listed compliance requirements with checkmarks
+
+### Technical Details
+
+#### Modified Files
+- `lib/_library` - Updated `generate_asset_inventory()` and `generate_warnings_report()`
+- `RUNME.sh` - Added serial number collection and NixOS metadata collection
+
+#### New Functions
+- `categorize_severity()` - Keyword-based severity detection for Lynis findings
+
+#### Configuration
+- Hardening score threshold configurable via `MIN_HARDENING_SCORE` constant (default: 65)
+
+### Migration Notes
+- All changes are backward compatible - existing audit functionality unchanged
+- New output files are created automatically, no user action required
+- dmidecode is optional - audit continues if not available
+
+### Fixed
+
+#### NixOS Metadata Extraction Regex Error
+- **Fixed**: Bash regex syntax error in NixOS commit hash extraction (lib/_library line 834)
+  - Issue: Problematic regex pattern `\(([^)]+)\)` caused conditional expression error
+  - Impact: Library functions failed to load, breaking `generate_asset_inventory` and `generate_warnings_report`
+  - Solution: Replaced regex matching with more portable sed-based extraction
+  - Before: `[[ "$version_line" =~ \(([^)]+)\) ]]` (failed on some bash versions)
+  - After: `sed -n 's/.*(\([^)]*\)).*/\1/p'` (portable, reliable)
+  - Testing: Verified on NixOS 25.11 - all functions load correctly
+
 ## 0.5.0 - Remove CVE Scanning (March 2026)
 
 ### Breaking Changes

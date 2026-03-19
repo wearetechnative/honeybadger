@@ -141,6 +141,14 @@ audit(){
  show_version > $output/honeybadger-info.txt
  checkBlockDevices > $output/blockdevices.txt
 
+ # Collect hardware serial number (requires root)
+ echo "Collecting hardware serial number..."
+ if command -v dmidecode >/dev/null 2>&1; then
+   dmidecode -s system-serial-number 2>/dev/null > "$output/hardware-serial.txt" || echo "Not available" > "$output/hardware-serial.txt"
+ else
+   echo "Not available" > "$output/hardware-serial.txt"
+ fi
+
  # Collect installed packages information
  echo "Collecting package information..."
  if command -v dpkg >/dev/null 2>&1; then
@@ -190,6 +198,59 @@ audit(){
        fi
      fi
    } > "$output/installed-packages.txt" 2>&1
+ fi
+
+ # Collect NixOS-specific metadata (if running on NixOS)
+ if command -v nixos-version >/dev/null 2>&1 || [[ -f /etc/os-release && $(grep -c "^ID=nixos" /etc/os-release 2>/dev/null) -gt 0 ]]; then
+   echo "Collecting NixOS system metadata..."
+   {
+     echo "=== NixOS System Information ==="
+     echo "Collection Date: $(date)"
+     echo ""
+
+     # Get NixOS version and commit hash
+     if command -v nixos-version >/dev/null 2>&1; then
+       echo "NixOS Version:"
+       nixos-version 2>/dev/null || echo "Unable to retrieve version"
+       echo ""
+
+       if nixos-version --json >/dev/null 2>&1; then
+         echo "Detailed Version Info (JSON):"
+         nixos-version --json 2>/dev/null || echo "JSON format not available"
+         echo ""
+       fi
+     fi
+
+     # Fallback: read version file
+     if [[ -f /run/current-system/nixos-version ]]; then
+       echo "System Version File:"
+       cat /run/current-system/nixos-version 2>/dev/null
+       echo ""
+     fi
+
+     # Get current system generation
+     if [[ -L /nix/var/nix/profiles/system ]]; then
+       echo "Current System Generation:"
+       readlink /nix/var/nix/profiles/system 2>/dev/null || echo "Unable to read"
+       echo ""
+     fi
+
+     # Get last rebuild date
+     if [[ -L /nix/var/nix/profiles/system ]]; then
+       echo "Last System Rebuild:"
+       stat -c "Date: %y" /nix/var/nix/profiles/system 2>/dev/null || stat -f "Date: %Sm" /nix/var/nix/profiles/system 2>/dev/null || echo "Unable to determine"
+       echo ""
+     fi
+
+     # List recent generations
+     if command -v nixos-rebuild >/dev/null 2>&1; then
+       echo "Recent System Generations (last 5):"
+       nixos-rebuild list-generations 2>/dev/null | tail -5 || echo "Unable to list generations"
+       echo ""
+     fi
+
+     echo "=== End of NixOS System Information ==="
+   } > "$output/nixos-system-info.txt" 2>&1
  fi
 
  # Check for screen lock tools
@@ -401,6 +462,14 @@ audit(){
 
    # Run OS/kernel status check
    check_os_status "$output" .cache || echo "  Warning: Could not complete OS/kernel analysis"
+
+   # Run OS update history check
+   echo "Checking OS update history..."
+   if [[ -f "$thisdir/lib/check-os-updates.sh" ]]; then
+     bash "$thisdir/lib/check-os-updates.sh" "$output/os-update-history.txt" >/dev/null 2>&1 || echo "  Warning: Could not check OS update history"
+   else
+     echo "  Warning: check-os-updates.sh not found, skipping update history"
+   fi
 
    # Generate asset inventory
    echo "Generating asset inventory..."

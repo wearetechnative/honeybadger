@@ -690,6 +690,13 @@ generate_asset_inventory() {
     local os_uptodate="Unknown"
     local owner=""
     local report_date=""
+    local hardening_score=""
+    local hardening_status=""
+    local nixos_commit=""
+    local nixos_generation=""
+
+    # Minimum hardening score threshold for compliance
+    local MIN_HARDENING_SCORE=65
 
     # Get hostname and OS info from lynis-report.json
     if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
@@ -700,6 +707,41 @@ generate_asset_inventory() {
         [[ "$malware_scanner" == "1" ]] && malware_scanner="Yes" || malware_scanner="No"
         firewall_active=$(jq -r '.firewall_active // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
         [[ "$firewall_active" == "1" ]] && firewall_active="Yes" || firewall_active="No"
+
+        # Extract hardening score
+        hardening_score=$(jq -r '.hardening_index // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+
+        # Format hardening score with status indicator and compliance check
+        if [[ "$hardening_score" != "Unknown" && "$hardening_score" =~ ^[0-9]+$ ]]; then
+            # Determine status indicator based on score
+            if [[ $hardening_score -ge 80 ]]; then
+                hardening_status="Excellent"
+            elif [[ $hardening_score -ge 60 ]]; then
+                hardening_status="Good"
+            elif [[ $hardening_score -ge 40 ]]; then
+                hardening_status="Fair"
+            else
+                hardening_status="Poor"
+            fi
+
+            # Check compliance threshold
+            if [[ $hardening_score -ge $MIN_HARDENING_SCORE ]]; then
+                hardening_score="${hardening_score}/100 ($hardening_status) ✅ COMPLIANT (≥${MIN_HARDENING_SCORE})"
+            else
+                hardening_score="${hardening_score}/100 ($hardening_status) ❌ NON-COMPLIANT (required: ≥${MIN_HARDENING_SCORE})"
+            fi
+        else
+            hardening_score="Unknown"
+        fi
+    fi
+
+    # Get serial number from dmidecode (requires root)
+    if [[ -f "$output_dir/hardware-serial.txt" ]]; then
+        serial=$(cat "$output_dir/hardware-serial.txt" 2>/dev/null | tr -d '\n')
+    fi
+    # Fallback if not available
+    if [[ -z "$serial" || "$serial" == "Not Specified" || "$serial" == "Default string" ]]; then
+        serial="Not available"
     fi
 
     # Get hardware info from neofetch.json or neofetch.txt
@@ -783,6 +825,27 @@ generate_asset_inventory() {
         report_date=$(date -r "$output_dir/lynis-report.json" +"%d-%m-%Y" 2>/dev/null)
     fi
 
+    # Extract NixOS metadata if available
+    if [[ -f "$output_dir/nixos-system-info.txt" ]]; then
+        # Try to extract commit hash from nixos-version output or JSON
+        local version_line=$(grep -E "^[0-9]+\.[0-9]+\." "$output_dir/nixos-system-info.txt" | head -1)
+        if [[ -n "$version_line" && "$version_line" =~ \.([a-f0-9]{7,}) ]]; then
+            nixos_commit="${BASH_REMATCH[1]}"
+        else
+            # Try to extract from parentheses using sed as fallback
+            local paren_content=$(echo "$version_line" | sed -n 's/.*(\([^)]*\)).*/\1/p')
+            if [[ -n "$paren_content" ]]; then
+                nixos_commit="${paren_content:0:8}"
+            fi
+        fi
+
+        # Extract generation number from system path
+        local gen_line=$(grep "system-.*-link" "$output_dir/nixos-system-info.txt" | head -1)
+        if [[ "$gen_line" =~ system-([0-9]+)-link ]]; then
+            nixos_generation="${BASH_REMATCH[1]}"
+        fi
+    fi
+
     # Generate report
     echo "=====================================" > "$report_file"
     echo "  ASSET INVENTORY" >> "$report_file"
@@ -796,7 +859,8 @@ generate_asset_inventory() {
     printf "%-35s-+-" "-----------------------------------" >> "$report_file"
     printf "%s\n" "----------------------------------------" >> "$report_file"
     printf "%-35s | %s\n" "Hostname (Asset ID)" "$hostname" >> "$report_file"
-    printf "%-35s | %s\n" "Serial Number / Model" "$model" >> "$report_file"
+    printf "%-35s | %s\n" "Serial Number" "$serial" >> "$report_file"
+    printf "%-35s | %s\n" "Model" "$model" >> "$report_file"
     printf "%-35s | %s\n" "Description" "Personal Device" >> "$report_file"
     printf "%-35s | %s\n" "OS Edition + Version" "$os_full" >> "$report_file"
     printf "%-35s | %s\n" "Kernel Version" "$kernel" >> "$report_file"
@@ -806,6 +870,14 @@ generate_asset_inventory() {
     printf "%-35s | %s\n" "Malware Scanner" "$malware_scanner" >> "$report_file"
     printf "%-35s | %s\n" "Firewall Active" "$firewall_active" >> "$report_file"
     printf "%-35s | %s\n" "OS Up-to-date" "$os_uptodate" >> "$report_file"
+    printf "%-35s | %s\n" "Lynis Hardening Score" "$hardening_score" >> "$report_file"
+    # Add NixOS-specific fields if available
+    if [[ -n "$nixos_commit" ]]; then
+        printf "%-35s | %s\n" "NixOS Commit Hash" "$nixos_commit" >> "$report_file"
+    fi
+    if [[ -n "$nixos_generation" ]]; then
+        printf "%-35s | %s\n" "NixOS Generation" "$nixos_generation" >> "$report_file"
+    fi
     printf "%-35s | %s\n" "Owner / User" "$owner" >> "$report_file"
     printf "%-35s | %s\n" "Last Audit Date" "$report_date" >> "$report_file"
 
@@ -826,6 +898,45 @@ generate_asset_inventory() {
 # ==============================================================================
 # WARNINGS/SUGGESTIONS REPORT GENERATION
 # ==============================================================================
+
+# Determine severity based on keywords in description
+# Usage: categorize_severity <description>
+# Returns: critical, high, medium, low, or unspecified
+categorize_severity() {
+    local description="$1"
+    local desc_lower=$(echo "$description" | tr '[:upper:]' '[:lower:]')
+
+    # Critical keywords
+    if [[ "$desc_lower" =~ (root|password|authentication|encryption|firewall|kernel|privilege|exploit|vulnerability|backdoor|malware) ]]; then
+        if [[ "$desc_lower" =~ (disabled|not.*enabled|no.*protection|missing|weak|empty|default) ]]; then
+            echo "critical"
+            return
+        fi
+    fi
+
+    # High severity keywords
+    if [[ "$desc_lower" =~ (security|permission|access|credential|key|certificate|audit|hardening) ]]; then
+        if [[ "$desc_lower" =~ (disabled|not.*enabled|missing|weak|insecure) ]]; then
+            echo "high"
+            return
+        fi
+    fi
+
+    # Medium severity keywords
+    if [[ "$desc_lower" =~ (update|patch|configuration|warning|should|recommend) ]]; then
+        echo "medium"
+        return
+    fi
+
+    # Low severity
+    if [[ "$desc_lower" =~ (consider|optional|suggestion|information) ]]; then
+        echo "low"
+        return
+    fi
+
+    # Default
+    echo "unspecified"
+}
 
 # Generate warnings and suggestions HTML/PDF report
 # Usage: generate_warnings_report <lynis_json> <output_base>
@@ -855,6 +966,62 @@ generate_warnings_report() {
     local lynis_version=$(jq -r '.lynis_version // "Unknown"' "$input_json" 2>/dev/null)
     local warning_count=$(jq -r '.["warning[]"] | length' "$input_json" 2>/dev/null)
     local suggestion_count=$(jq -r '.["suggestion[]"] | length' "$input_json" 2>/dev/null)
+
+    # Categorize suggestions by severity using temp files
+    local temp_critical="/tmp/lynis-critical-$$.json"
+    local temp_high="/tmp/lynis-high-$$.json"
+    local temp_medium="/tmp/lynis-medium-$$.json"
+    local temp_low="/tmp/lynis-low-$$.json"
+    local temp_unspecified="/tmp/lynis-unspecified-$$.json"
+
+    # Initialize temp files
+    echo "[]" > "$temp_critical"
+    echo "[]" > "$temp_high"
+    echo "[]" > "$temp_medium"
+    echo "[]" > "$temp_low"
+    echo "[]" > "$temp_unspecified"
+
+    # Categorize each suggestion (using process substitution to avoid subshell)
+    if [[ "$suggestion_count" -gt 0 ]]; then
+        # Export function for use in subshell
+        export -f categorize_severity
+
+        # Process suggestions and categorize them
+        jq -c '.["suggestion[]"][] | {id: .id, description: .description}' "$input_json" 2>/dev/null > "/tmp/suggestions-$$.jsonl"
+
+        # Categorize using bash
+        while IFS= read -r suggestion; do
+            local description=$(echo "$suggestion" | jq -r '.description')
+            local severity=$(categorize_severity "$description")
+            local id=$(echo "$suggestion" | jq -r '.id')
+
+            # Write to appropriate temp file
+            echo "{\"id\":\"$id\",\"description\":$(echo "$description" | jq -Rs .),\"severity\":\"$severity\"}" >> "/tmp/sev-${severity}-$$.jsonl"
+        done < "/tmp/suggestions-$$.jsonl"
+
+        # Convert JSONL to JSON arrays and count
+        for sev in critical high medium low unspecified; do
+            if [[ -f "/tmp/sev-${sev}-$$.jsonl" ]]; then
+                jq -s '.' "/tmp/sev-${sev}-$$.jsonl" > "/tmp/lynis-${sev}-$$.json" 2>/dev/null
+                rm "/tmp/sev-${sev}-$$.jsonl"
+            fi
+        done
+
+        # Count each severity
+        local critical_count=$(jq -r 'length' "$temp_critical" 2>/dev/null || echo 0)
+        local high_count=$(jq -r 'length' "$temp_high" 2>/dev/null || echo 0)
+        local medium_count=$(jq -r 'length' "$temp_medium" 2>/dev/null || echo 0)
+        local low_count=$(jq -r 'length' "$temp_low" 2>/dev/null || echo 0)
+        local unspecified_count=$(jq -r 'length' "$temp_unspecified" 2>/dev/null || echo 0)
+
+        rm -f "/tmp/suggestions-$$.jsonl"
+    else
+        local critical_count=0
+        local high_count=0
+        local medium_count=0
+        local low_count=0
+        local unspecified_count=0
+    fi
 
     # Generate HTML
     cat > "$temp_html" <<'HTML_HEADER'
@@ -925,9 +1092,11 @@ generate_warnings_report() {
             font-weight: bold;
             margin-left: 10px;
         }
-        .severity-high { background-color: #dc3545; color: white; }
+        .severity-critical { background-color: #dc3545; color: white; }
+        .severity-high { background-color: #fd7e14; color: white; }
         .severity-medium { background-color: #ffc107; color: #333; }
-        .severity-low { background-color: #28a745; color: white; }
+        .severity-low { background-color: #17a2b8; color: white; }
+        .severity-unspecified { background-color: #6c757d; color: white; }
         .no-issues {
             background-color: #d4edda;
             border-left: 4px solid #28a745;
@@ -962,6 +1131,13 @@ HTML_HEADER
         <p><strong>Summary:</strong></p>
         <p>⚠️  Warnings: $warning_count</p>
         <p>💡 Suggestions: $suggestion_count</p>
+        <p style="margin-left: 20px; font-size: 0.95em;">
+            🔴 Critical: $critical_count |
+            🟠 High: $high_count |
+            🟡 Medium: $medium_count |
+            🔵 Low: $low_count |
+            ⚪ Unspecified: $unspecified_count
+        </p>
     </div>
 EOF
 
@@ -980,23 +1156,83 @@ WARNINGS_HEADER
         echo '<div class="no-issues">✓ No warnings found. Great job!</div>' >> "$temp_html"
     fi
 
-    # Add suggestions section
+    # Add suggestions section grouped by severity
     cat >> "$temp_html" <<'SUGGESTIONS_HEADER'
     <h2>💡 Suggestions</h2>
 SUGGESTIONS_HEADER
 
     if [[ "$suggestion_count" -gt 0 ]]; then
-        jq -r '.["suggestion[]"] | .[] |
-            "<div class=\"suggestion\">" +
-            "<span class=\"suggestion-id\">" + .id + "</span>" +
-            (if .severity and .severity != "NA" and .severity != null then
-                " <span class=\"severity severity-" + (.severity | ascii_downcase) + "\">" + .severity + "</span>"
-            else "" end) +
-            "<p>" + .description + "</p>" +
-            "</div>"' "$input_json" >> "$temp_html" 2>/dev/null
+        # Critical findings
+        if [[ $critical_count -gt 0 ]]; then
+            cat >> "$temp_html" <<'CRITICAL_HEADER'
+    <h3 style="color: #dc3545;">🔴 CRITICAL FINDINGS</h3>
+CRITICAL_HEADER
+            jq -r '.[] |
+                "<div class=\"suggestion\" style=\"border-left-color: #dc3545;\">" +
+                "<span class=\"suggestion-id\">" + .id + "</span>" +
+                " <span class=\"severity severity-critical\">CRITICAL</span>" +
+                "<p>" + .description + "</p>" +
+                "</div>"' "$temp_critical" >> "$temp_html" 2>/dev/null
+        fi
+
+        # High severity
+        if [[ $high_count -gt 0 ]]; then
+            cat >> "$temp_html" <<'HIGH_HEADER'
+    <h3 style="color: #fd7e14;">🟠 High Priority</h3>
+HIGH_HEADER
+            jq -r '.[] |
+                "<div class=\"suggestion\" style=\"border-left-color: #fd7e14;\">" +
+                "<span class=\"suggestion-id\">" + .id + "</span>" +
+                " <span class=\"severity severity-high\">HIGH</span>" +
+                "<p>" + .description + "</p>" +
+                "</div>"' "$temp_high" >> "$temp_html" 2>/dev/null
+        fi
+
+        # Medium severity
+        if [[ $medium_count -gt 0 ]]; then
+            cat >> "$temp_html" <<'MEDIUM_HEADER'
+    <h3 style="color: #ffc107;">🟡 Medium Priority</h3>
+MEDIUM_HEADER
+            jq -r '.[] |
+                "<div class=\"suggestion\" style=\"border-left-color: #ffc107;\">" +
+                "<span class=\"suggestion-id\">" + .id + "</span>" +
+                " <span class=\"severity severity-medium\">MEDIUM</span>" +
+                "<p>" + .description + "</p>" +
+                "</div>"' "$temp_medium" >> "$temp_html" 2>/dev/null
+        fi
+
+        # Low severity
+        if [[ $low_count -gt 0 ]]; then
+            cat >> "$temp_html" <<'LOW_HEADER'
+    <h3 style="color: #17a2b8;">🔵 Low Priority</h3>
+LOW_HEADER
+            jq -r '.[] |
+                "<div class=\"suggestion\" style=\"border-left-color: #17a2b8;\">" +
+                "<span class=\"suggestion-id\">" + .id + "</span>" +
+                " <span class=\"severity severity-low\">LOW</span>" +
+                "<p>" + .description + "</p>" +
+                "</div>"' "$temp_low" >> "$temp_html" 2>/dev/null
+        fi
+
+        # Unspecified
+        if [[ $unspecified_count -gt 0 ]]; then
+            cat >> "$temp_html" <<'UNSPECIFIED_HEADER'
+    <h3 style="color: #6c757d;">⚪ Other Findings</h3>
+UNSPECIFIED_HEADER
+            jq -r '.[] |
+                "<div class=\"suggestion\" style=\"border-left-color: #6c757d;\">" +
+                "<span class=\"suggestion-id\">" + .id + "</span>" +
+                " <span class=\"severity severity-unspecified\">UNSPECIFIED</span>" +
+                "<p>" + .description + "</p>" +
+                "</div>"' "$temp_unspecified" >> "$temp_html" 2>/dev/null
+        fi
     else
         echo '<div class="no-issues">✓ No suggestions. System is well configured!</div>' >> "$temp_html"
     fi
+
+    # Cleanup temp files
+    rm -f "$temp_critical" "$temp_high" "$temp_medium" "$temp_low" "$temp_unspecified"
+    rm -f "${temp_critical}.tmp" "${temp_high}.tmp" "${temp_medium}.tmp" "${temp_low}.tmp" "${temp_unspecified}.tmp"
 
     # Add footer
     cat >> "$temp_html" <<'HTML_FOOTER'
