@@ -482,6 +482,18 @@ audit(){
    echo "  Skipping OS/kernel analysis (jq not available or lynis report missing)"
  fi
 
+ # Generate final consolidated report
+ echo "Generating final audit report..."
+ if [[ -x "$thisdir/lib/generate-final-report.sh" ]]; then
+   if "$thisdir/lib/generate-final-report.sh" "$output" 2>/dev/null; then
+     echo "  ✅ Final report: $output/final-report.md"
+   else
+     echo "  ⚠️  Warning: Could not generate final report (non-critical)"
+   fi
+ else
+   echo "  ⚠️  Warning: generate-final-report.sh not found or not executable"
+ fi
+
  tar czf $tarball $output
 
 # Fix ownership when running with sudo (tarball and output should belong to actual user, not root)

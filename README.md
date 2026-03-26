@@ -92,6 +92,7 @@ Honeybadger performs a comprehensive security audit and collects the following i
 
 The audit generates the following reports in `output-<hostname>-<user>-<date>/`:
 
+- `final-report.md` - **Consolidated final audit report** with all key information (asset ID, OS/kernel status, security controls, compliance metrics)
 - `asset-inventory.txt` - Summary of all collected information with compliance status
 - `lynis-report.json` - Detailed Lynis security audit data
 - `lynis-report-warnings_fails.html` - HTML report with color-coded security findings
