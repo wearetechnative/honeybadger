@@ -5,3 +5,6 @@ output-*/
 .**sw*
 .cache/
 honeybadger*report.txt
+lynis.dat
+lib/os-kernel-status.txt
+os-kernel-status.txt
