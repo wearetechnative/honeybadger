@@ -546,6 +546,79 @@ submit(){
  exit $exit_code
 }
 
+make_command "submit-tar" "Submit tar archive to honeybadger-server"
+submit-tar(){
+ # Parse optional tar file parameter
+ local tar_file="$1"
+
+ # If no file specified, find the most recent one
+ if [[ -z "$tar_file" ]]; then
+   echo "No tar file specified, searching for most recent..."
+   tar_file=$(find_latest_tar)
+   if [[ $? -ne 0 ]]; then
+     echo "ERROR: No tar files found. Run audit first or specify a tar file."
+     echo ""
+     echo "Usage: ./RUNME.sh submit-tar [tar-file]"
+     echo "Example: ./RUNME.sh submit-tar honeybadger-hostname-user-20-03-2026.tar.gz"
+     echo ""
+     echo "Or run an audit first:"
+     echo "  sudo ./RUNME.sh audit"
+     exit 1
+   fi
+   echo "Found: $tar_file"
+   echo ""
+ fi
+
+ # Validate file exists
+ if [[ ! -f "$tar_file" ]]; then
+   echo "ERROR: File not found: $tar_file"
+   echo ""
+   echo "Usage: ./RUNME.sh submit-tar [tar-file]"
+   echo "Example: ./RUNME.sh submit-tar honeybadger-hostname-user-20-03-2026.tar.gz"
+   echo ""
+   echo "Available tar files:"
+   ls -t honeybadger-*.tar.gz honeybadger-*.tar 2>/dev/null || echo "  (none found)"
+   exit 1
+ fi
+
+ echo "======================================"
+ echo "Submitting tar archive to server"
+ echo "======================================"
+ echo ""
+
+ # Load configuration
+ load_server_config
+ echo ""
+
+ # Check if submission is enabled
+ if [[ "$SERVER_ENABLED" != "true" ]]; then
+   echo "Server submission is disabled (SERVER_ENABLED=false)"
+   echo "To enable, set SERVER_ENABLED=true in configuration file"
+   echo "Configuration locations:"
+   echo "  - ./.honeybadger.conf (current directory)"
+   echo "  - ~/.honeybadger.conf (user home)"
+   echo "  - /etc/honeybadger.conf (system-wide)"
+   exit 0
+ fi
+
+ # Submit tar file
+ submit_tar_file "$tar_file"
+ exit_code=$?
+
+ echo ""
+ if [[ $exit_code -eq 0 ]]; then
+   echo "======================================"
+   echo "Submission complete!"
+   echo "======================================"
+ else
+   echo "======================================"
+   echo "Submission failed"
+   echo "======================================"
+ fi
+
+ exit $exit_code
+}
+
 make_command "check-output" "Check OS and kernel status from existing output"
 check-output(){
  if [[ -z "$1" ]]; then
