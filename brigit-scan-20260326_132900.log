@@ -1,0 +1,13 @@
+REPOSITORY                   STATUS
+wearetechnative/honeybadger  NOK
+
+Summary:
+- Repositories with proper branch protection: 0
+- Repositories with improper branch protection: 1
+- Repositories with errors (branch missing or access issues): 0
+- Repositories in archived status: 0
+- Repositories ignored: 0
+- Total repositories scanned: 1
+
+Repositories with issues:
+- wearetechnative/honeybadger: No branch protection enabled

@@ -5,6 +5,8 @@
 SERVER_ENABLED=false
 
 # Server URL (default: http://localhost:7123/)
+# Used for both JSON report submission (./RUNME.sh submit) and tar archive submission (./RUNME.sh submit-tar)
+# Endpoints: SERVER_URL/ for JSON reports, SERVER_URL/submit-tar for tar archives
 SERVER_URL=http://localhost:7123/
 
 # Connection timeout in seconds (default: 30)

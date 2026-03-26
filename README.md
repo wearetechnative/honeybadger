@@ -165,7 +165,11 @@ DRY_RUN=false
 
 ### Submitting Reports
 
-After running an audit, you can submit the reports to the server:
+After running an audit, you can submit reports to the server in two ways:
+
+#### Submit Individual JSON Reports
+
+Submit individual report files (neofetch.json, lynis-report.json, etc.):
 
 ```bash
 # Submit the most recent audit reports
@@ -174,6 +178,22 @@ After running an audit, you can submit the reports to the server:
 # Submit reports from a specific directory
 ./RUNME.sh submit output-hostname-user-17-03-2026
 ```
+
+#### Submit Complete Tar Archive
+
+Submit the complete audit package as a single tar archive (simpler, single upload):
+
+```bash
+# Submit the most recent tar archive (auto-discovery)
+./RUNME.sh submit-tar
+
+# Submit a specific tar archive
+./RUNME.sh submit-tar honeybadger-hostname-user-20-03-2026.tar.gz
+```
+
+**Server Requirements:**
+- Individual JSON submission uses endpoint: `SERVER_URL/`
+- Tar archive submission uses endpoint: `SERVER_URL/submit-tar`
 
 **Note:** Report submission is completely separate from the audit command. The audit generates local reports only. You must explicitly run the submit command to send reports to the server.
 
@@ -184,9 +204,29 @@ To test submission without actually sending data to the server:
 ```bash
 # Set DRY_RUN=true in your config file, then run:
 ./RUNME.sh submit
+# Or for tar submission:
+./RUNME.sh submit-tar
 ```
 
 This will show what would be submitted, including the exact curl commands that would be executed.
+
+### Troubleshooting
+
+**No tar files found:**
+- Run an audit first: `sudo ./RUNME.sh audit`
+- Check if tar files exist: `ls honeybadger-*.tar.gz`
+
+**Connection timeout:**
+- Increase `SERVER_TIMEOUT` in config (default: 30 seconds)
+- Large tar files may need longer timeout (e.g., 60-120 seconds)
+
+**Server returns 404 on /submit-tar:**
+- Ensure honeybadger-server supports the `/submit-tar` endpoint
+- Verify `SERVER_URL` is correct in configuration
+
+**Permission denied:**
+- Config file: `chmod 600 .honeybadger.conf`
+- Tar files: ensure readable by current user
 
 ## Credits
 
