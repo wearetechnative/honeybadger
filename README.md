@@ -153,6 +153,10 @@ SERVER_ENABLED=true
 # Server URL
 SERVER_URL=http://honeybadger-server:7123/
 
+# Bearer token for authentication (required)
+# Example: SERVER_TOKEN=hb_token_faa0c072984086bf2c32055cbbf40c2
+SERVER_TOKEN=hb_token_your_token_here
+
 # Connection timeout in seconds
 SERVER_TIMEOUT=30
 

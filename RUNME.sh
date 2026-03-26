@@ -601,6 +601,20 @@ submit-tar(){
    exit 0
  fi
 
+ # Check if token is configured
+ if [[ -z "$SERVER_TOKEN" ]]; then
+   echo "ERROR: SERVER_TOKEN is required but not configured"
+   echo ""
+   echo "The server requires authentication. Please add SERVER_TOKEN to your configuration file:"
+   echo "  SERVER_TOKEN=hb_token_your_token_here"
+   echo ""
+   echo "Configuration locations:"
+   echo "  - ./.honeybadger.conf (current directory)"
+   echo "  - ~/.honeybadger.conf (user home)"
+   echo "  - /etc/honeybadger.conf (system-wide)"
+   exit 1
+ fi
+
  # Submit tar file
  submit_tar_file "$tar_file"
  exit_code=$?

@@ -1287,6 +1287,7 @@ load_server_config() {
     # Default values
     SERVER_ENABLED="${SERVER_ENABLED:-false}"
     SERVER_URL="${SERVER_URL:-http://localhost:7123/}"
+    SERVER_TOKEN="${SERVER_TOKEN:-}"
     SERVER_TIMEOUT="${SERVER_TIMEOUT:-30}"
     SERVER_RETRY_COUNT="${SERVER_RETRY_COUNT:-3}"
     DRY_RUN="${DRY_RUN:-false}"
@@ -1370,6 +1371,14 @@ submit_report() {
         -H "X-Hostname: $hostname"
         -H "X-Username: $username"
         -H "X-Report-Type: $report_type"
+    )
+
+    # Add Authorization header if token is configured
+    if [[ -n "$SERVER_TOKEN" ]]; then
+        curl_cmd+=(-H "Authorization: Bearer $SERVER_TOKEN")
+    fi
+
+    curl_cmd+=(
         --max-time "$SERVER_TIMEOUT"
         --silent
         --show-error
@@ -1455,6 +1464,14 @@ submit_tar_file() {
         -H "Content-Type: application/x-tar"
         -H "X-Hostname: $hostname"
         -H "X-Username: $username"
+    )
+
+    # Add Authorization header if token is configured
+    if [[ -n "$SERVER_TOKEN" ]]; then
+        curl_cmd+=(-H "Authorization: Bearer $SERVER_TOKEN")
+    fi
+
+    curl_cmd+=(
         --max-time "$SERVER_TIMEOUT"
         --silent
         --show-error
@@ -1535,6 +1552,20 @@ submit_all_reports() {
     if [[ "$SERVER_ENABLED" != "true" ]]; then
         echo "Server submission is disabled (SERVER_ENABLED=false)"
         echo "To enable, set SERVER_ENABLED=true in configuration file"
+        return 1
+    fi
+
+    # Check if token is configured
+    if [[ -z "$SERVER_TOKEN" ]]; then
+        echo "ERROR: SERVER_TOKEN is required but not configured"
+        echo ""
+        echo "The server requires authentication. Please add SERVER_TOKEN to your configuration file:"
+        echo "  SERVER_TOKEN=hb_token_your_token_here"
+        echo ""
+        echo "Configuration locations:"
+        echo "  - ./.honeybadger.conf (current directory)"
+        echo "  - ~/.honeybadger.conf (user home)"
+        echo "  - /etc/honeybadger.conf (system-wide)"
         return 1
     fi
 

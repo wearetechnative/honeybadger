@@ -9,6 +9,10 @@ SERVER_ENABLED=false
 # Endpoints: SERVER_URL/ for JSON reports, SERVER_URL/submit-tar for tar archives
 SERVER_URL=http://localhost:7123/
 
+# Bearer token for authentication (required)
+# Example: SERVER_TOKEN=hb_token_aabbccddeeff1122332c32055cbbf40c2
+SERVER_TOKEN=
+
 # Connection timeout in seconds (default: 30)
 SERVER_TIMEOUT=30
 
