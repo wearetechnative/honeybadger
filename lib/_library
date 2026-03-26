@@ -1328,6 +1328,21 @@ find_latest_output_dir() {
     return 0
 }
 
+# Find the most recent tar archive file
+# Searches for honeybadger-*.tar.gz and honeybadger-*.tar files
+find_latest_tar() {
+    local latest_tar
+    latest_tar=$(ls -t honeybadger-*.tar.gz honeybadger-*.tar 2>/dev/null | head -n 1)
+
+    if [[ -z "$latest_tar" ]]; then
+        echo "ERROR: No tar files found" >&2
+        return 1
+    fi
+
+    echo "$latest_tar"
+    return 0
+}
+
 # Submit a single report to the server
 # Usage: submit_report <report_file> <report_type>
 submit_report() {
@@ -1403,6 +1418,91 @@ submit_report() {
             sleep "$delay"
         else
             echo "✗ Failed to submit $report_type after $max_attempts attempts (HTTP $http_code, curl exit $curl_exit)"
+            return 1
+        fi
+
+        ((attempt++))
+    done
+
+    return 1
+}
+
+# Submit tar file to server
+# Usage: submit_tar_file <tar_file_path>
+submit_tar_file() {
+    local tar_file="$1"
+
+    # Validate file exists
+    if [[ ! -f "$tar_file" ]]; then
+        echo "ERROR: File not found: $tar_file" >&2
+        return 1
+    fi
+
+    # Auto-detect system identity
+    local hostname
+    hostname=$(hostname -s)
+    local username
+    username="${SUDO_USER:-$(whoami)}"
+
+    # Build /submit-tar endpoint URL
+    local endpoint="${SERVER_URL%/}/submit-tar"
+
+    # Build curl command
+    local curl_cmd=(
+        curl
+        -X POST
+        "$endpoint"
+        -H "Content-Type: application/x-tar"
+        -H "X-Hostname: $hostname"
+        -H "X-Username: $username"
+        --max-time "$SERVER_TIMEOUT"
+        --silent
+        --show-error
+        --write-out "%{http_code}"
+        --output /dev/null
+        --data-binary "@$tar_file"
+    )
+
+    # Dry-run mode
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "DRY-RUN: Would submit tar file"
+        echo "  File: $tar_file"
+        echo "  Endpoint: $endpoint"
+        echo "  Headers: X-Hostname=$hostname, X-Username=$username"
+        echo "  Command: ${curl_cmd[*]}"
+        return 0
+    fi
+
+    # Retry logic with exponential backoff
+    local attempt=1
+    local max_attempts=$SERVER_RETRY_COUNT
+
+    while [[ $attempt -le $max_attempts ]]; do
+        echo "Submitting tar file (attempt $attempt/$max_attempts)..."
+
+        local http_code
+        http_code=$("${curl_cmd[@]}" 2>&1)
+        local curl_exit=$?
+
+        # Check HTTP response
+        if [[ $curl_exit -eq 0 && "$http_code" == "200" ]]; then
+            echo "✓ Successfully submitted tar file: $tar_file"
+            return 0
+        fi
+
+        # Handle client errors (don't retry)
+        if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+            echo "✗ Failed to submit tar file: HTTP $http_code (client error, not retrying)" >&2
+            return 1
+        fi
+
+        # Log failure and retry if attempts remaining
+        if [[ $attempt -lt $max_attempts ]]; then
+            local delay=$((2 ** (attempt - 1)))  # Exponential backoff: 1s, 2s, 4s
+            echo "  Failed (HTTP $http_code, curl exit $curl_exit), retrying in ${delay}s..."
+            sleep "$delay"
+        else
+            echo "✗ Failed to submit tar file after $max_attempts attempts (HTTP $http_code, curl exit $curl_exit)" >&2
             return 1
         fi
 
