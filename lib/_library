@@ -705,8 +705,9 @@ generate_asset_inventory() {
         os_version=$(jq -r '.os_version // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
         malware_scanner=$(jq -r '.malware_scanner_installed // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
         [[ "$malware_scanner" == "1" ]] && malware_scanner="Yes" || malware_scanner="No"
-        firewall_active=$(jq -r '.firewall_active // "0"' "$output_dir/lynis-report.json" 2>/dev/null)
-        [[ "$firewall_active" == "1" ]] && firewall_active="Yes" || firewall_active="No"
+
+        # Use check_firewall_status() for enhanced detection with fallback
+        firewall_active=$(check_firewall_status "$output_dir")
 
         # Extract hardening score
         hardening_score=$(jq -r '.hardening_index // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
@@ -878,6 +879,17 @@ generate_asset_inventory() {
     if [[ -n "$nixos_generation" ]]; then
         printf "%-35s | %s\n" "NixOS Generation" "$nixos_generation" >> "$report_file"
     fi
+    # Add NixOS supply chain field if NixOS
+    if is_nixos "$output_dir"; then
+        local supply_chain_result=$(check_nixos_supply_chain "$output_dir")
+        local supply_chain_display="Unknown"
+        if [[ "$supply_chain_result" == "PASS" ]]; then
+            supply_chain_display="Secure (sigs enforced)"
+        elif [[ "$supply_chain_result" == "FAIL" ]]; then
+            supply_chain_display="Insecure"
+        fi
+        printf "%-35s | %s\n" "NixOS Supply Chain" "$supply_chain_display" >> "$report_file"
+    fi
     printf "%-35s | %s\n" "Owner / User" "$owner" >> "$report_file"
     printf "%-35s | %s\n" "Last Audit Date" "$report_date" >> "$report_file"
 
@@ -895,387 +907,6 @@ generate_asset_inventory() {
     return 0
 }
 
-# ==============================================================================
-# WARNINGS/SUGGESTIONS REPORT GENERATION
-# ==============================================================================
-
-# Determine severity based on keywords in description
-# Usage: categorize_severity <description>
-# Returns: critical, high, medium, low, or unspecified
-categorize_severity() {
-    local description="$1"
-    local desc_lower=$(echo "$description" | tr '[:upper:]' '[:lower:]')
-
-    # Critical keywords
-    if [[ "$desc_lower" =~ (root|password|authentication|encryption|firewall|kernel|privilege|exploit|vulnerability|backdoor|malware) ]]; then
-        if [[ "$desc_lower" =~ (disabled|not.*enabled|no.*protection|missing|weak|empty|default) ]]; then
-            echo "critical"
-            return
-        fi
-    fi
-
-    # High severity keywords
-    if [[ "$desc_lower" =~ (security|permission|access|credential|key|certificate|audit|hardening) ]]; then
-        if [[ "$desc_lower" =~ (disabled|not.*enabled|missing|weak|insecure) ]]; then
-            echo "high"
-            return
-        fi
-    fi
-
-    # Medium severity keywords
-    if [[ "$desc_lower" =~ (update|patch|configuration|warning|should|recommend) ]]; then
-        echo "medium"
-        return
-    fi
-
-    # Low severity
-    if [[ "$desc_lower" =~ (consider|optional|suggestion|information) ]]; then
-        echo "low"
-        return
-    fi
-
-    # Default
-    echo "unspecified"
-}
-
-# Generate warnings and suggestions HTML/PDF report
-# Usage: generate_warnings_report <lynis_json> <output_base>
-# Output: Creates ${output_base}.html and optionally ${output_base}.pdf
-generate_warnings_report() {
-    local input_json="$1"
-    local output_base="$2"
-    local output_html="${output_base}.html"
-    local output_pdf="${output_base}.pdf"
-    local temp_html="/tmp/lynis-warnings-$$.html"
-
-    if [[ ! -f "$input_json" ]]; then
-        echo "ERROR: Input file $input_json does not exist"
-        return 1
-    fi
-
-    # Check jq dependency
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "ERROR: jq is required for warnings report generation"
-        return 1
-    fi
-
-    # Extract data from JSON
-    local hostname=$(jq -r '.hostname // "Unknown"' "$input_json" 2>/dev/null)
-    local os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$input_json" 2>/dev/null)
-    local report_date=$(jq -r '.report_datetime_start // "Unknown"' "$input_json" 2>/dev/null)
-    local lynis_version=$(jq -r '.lynis_version // "Unknown"' "$input_json" 2>/dev/null)
-    local warning_count=$(jq -r '.["warning[]"] | length' "$input_json" 2>/dev/null)
-    local suggestion_count=$(jq -r '.["suggestion[]"] | length' "$input_json" 2>/dev/null)
-
-    # Categorize suggestions by severity using temp files
-    local temp_critical="/tmp/lynis-critical-$$.json"
-    local temp_high="/tmp/lynis-high-$$.json"
-    local temp_medium="/tmp/lynis-medium-$$.json"
-    local temp_low="/tmp/lynis-low-$$.json"
-    local temp_unspecified="/tmp/lynis-unspecified-$$.json"
-
-    # Initialize temp files
-    echo "[]" > "$temp_critical"
-    echo "[]" > "$temp_high"
-    echo "[]" > "$temp_medium"
-    echo "[]" > "$temp_low"
-    echo "[]" > "$temp_unspecified"
-
-    # Categorize each suggestion (using process substitution to avoid subshell)
-    if [[ "$suggestion_count" -gt 0 ]]; then
-        # Export function for use in subshell
-        export -f categorize_severity
-
-        # Process suggestions and categorize them
-        jq -c '.["suggestion[]"][] | {id: .id, description: .description}' "$input_json" 2>/dev/null > "/tmp/suggestions-$$.jsonl"
-
-        # Categorize using bash
-        while IFS= read -r suggestion; do
-            local description=$(echo "$suggestion" | jq -r '.description')
-            local severity=$(categorize_severity "$description")
-            local id=$(echo "$suggestion" | jq -r '.id')
-
-            # Write to appropriate temp file
-            echo "{\"id\":\"$id\",\"description\":$(echo "$description" | jq -Rs .),\"severity\":\"$severity\"}" >> "/tmp/sev-${severity}-$$.jsonl"
-        done < "/tmp/suggestions-$$.jsonl"
-
-        # Convert JSONL to JSON arrays and count
-        for sev in critical high medium low unspecified; do
-            if [[ -f "/tmp/sev-${sev}-$$.jsonl" ]]; then
-                jq -s '.' "/tmp/sev-${sev}-$$.jsonl" > "/tmp/lynis-${sev}-$$.json" 2>/dev/null
-                rm "/tmp/sev-${sev}-$$.jsonl"
-            fi
-        done
-
-        # Count each severity
-        local critical_count=$(jq -r 'length' "$temp_critical" 2>/dev/null || echo 0)
-        local high_count=$(jq -r 'length' "$temp_high" 2>/dev/null || echo 0)
-        local medium_count=$(jq -r 'length' "$temp_medium" 2>/dev/null || echo 0)
-        local low_count=$(jq -r 'length' "$temp_low" 2>/dev/null || echo 0)
-        local unspecified_count=$(jq -r 'length' "$temp_unspecified" 2>/dev/null || echo 0)
-
-        rm -f "/tmp/suggestions-$$.jsonl"
-    else
-        local critical_count=0
-        local high_count=0
-        local medium_count=0
-        local low_count=0
-        local unspecified_count=0
-    fi
-
-    # Generate HTML
-    cat > "$temp_html" <<'HTML_HEADER'
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Lynis Security Audit - Warnings and Suggestions</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 40px;
-            color: #333;
-        }
-        h1 {
-            color: #2c3e50;
-            border-bottom: 3px solid #e74c3c;
-            padding-bottom: 10px;
-        }
-        h2 {
-            color: #34495e;
-            border-bottom: 2px solid #95a5a6;
-            padding-bottom: 5px;
-            margin-top: 30px;
-        }
-        .header-info {
-            background-color: #ecf0f1;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 30px;
-        }
-        .header-info p {
-            margin: 5px 0;
-        }
-        .summary {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        .warning {
-            background-color: #f8d7da;
-            border-left: 4px solid #dc3545;
-            padding: 12px;
-            margin-bottom: 10px;
-            border-radius: 3px;
-        }
-        .warning-id {
-            font-weight: bold;
-            color: #721c24;
-        }
-        .suggestion {
-            background-color: #d1ecf1;
-            border-left: 4px solid #17a2b8;
-            padding: 12px;
-            margin-bottom: 10px;
-            border-radius: 3px;
-        }
-        .suggestion-id {
-            font-weight: bold;
-            color: #0c5460;
-        }
-        .severity {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-size: 0.9em;
-            font-weight: bold;
-            margin-left: 10px;
-        }
-        .severity-critical { background-color: #dc3545; color: white; }
-        .severity-high { background-color: #fd7e14; color: white; }
-        .severity-medium { background-color: #ffc107; color: #333; }
-        .severity-low { background-color: #17a2b8; color: white; }
-        .severity-unspecified { background-color: #6c757d; color: white; }
-        .no-issues {
-            background-color: #d4edda;
-            border-left: 4px solid #28a745;
-            padding: 15px;
-            color: #155724;
-        }
-        .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #ccc;
-            font-size: 0.9em;
-            color: #666;
-        }
-    </style>
-</head>
-<body>
-    <h1>🛡️ Lynis Security Audit Report</h1>
-    <h2>Warnings and Suggestions</h2>
-
-    <div class="header-info">
-HTML_HEADER
-
-    # Add header information
-    cat >> "$temp_html" <<EOF
-        <p><strong>Hostname:</strong> $hostname</p>
-        <p><strong>Operating System:</strong> $os_full</p>
-        <p><strong>Report Date:</strong> $report_date</p>
-        <p><strong>Lynis Version:</strong> $lynis_version</p>
-    </div>
-
-    <div class="summary">
-        <p><strong>Summary:</strong></p>
-        <p>⚠️  Warnings: $warning_count</p>
-        <p>💡 Suggestions: $suggestion_count</p>
-        <p style="margin-left: 20px; font-size: 0.95em;">
-            🔴 Critical: $critical_count |
-            🟠 High: $high_count |
-            🟡 Medium: $medium_count |
-            🔵 Low: $low_count |
-            ⚪ Unspecified: $unspecified_count
-        </p>
-    </div>
-EOF
-
-    # Add warnings section
-    cat >> "$temp_html" <<'WARNINGS_HEADER'
-    <h2>⚠️  Warnings</h2>
-WARNINGS_HEADER
-
-    if [[ "$warning_count" -gt 0 ]]; then
-        jq -r '.["warning[]"] | to_entries | .[] |
-            "<div class=\"warning\">" +
-            "<span class=\"warning-id\">WARNING:</span> " +
-            (.value | tostring) +
-            "</div>"' "$input_json" >> "$temp_html" 2>/dev/null
-    else
-        echo '<div class="no-issues">✓ No warnings found. Great job!</div>' >> "$temp_html"
-    fi
-
-    # Add suggestions section grouped by severity
-    cat >> "$temp_html" <<'SUGGESTIONS_HEADER'
-    <h2>💡 Suggestions</h2>
-SUGGESTIONS_HEADER
-
-    if [[ "$suggestion_count" -gt 0 ]]; then
-        # Critical findings
-        if [[ $critical_count -gt 0 ]]; then
-            cat >> "$temp_html" <<'CRITICAL_HEADER'
-    <h3 style="color: #dc3545;">🔴 CRITICAL FINDINGS</h3>
-CRITICAL_HEADER
-            jq -r '.[] |
-                "<div class=\"suggestion\" style=\"border-left-color: #dc3545;\">" +
-                "<span class=\"suggestion-id\">" + .id + "</span>" +
-                " <span class=\"severity severity-critical\">CRITICAL</span>" +
-                "<p>" + .description + "</p>" +
-                "</div>"' "$temp_critical" >> "$temp_html" 2>/dev/null
-        fi
-
-        # High severity
-        if [[ $high_count -gt 0 ]]; then
-            cat >> "$temp_html" <<'HIGH_HEADER'
-    <h3 style="color: #fd7e14;">🟠 High Priority</h3>
-HIGH_HEADER
-            jq -r '.[] |
-                "<div class=\"suggestion\" style=\"border-left-color: #fd7e14;\">" +
-                "<span class=\"suggestion-id\">" + .id + "</span>" +
-                " <span class=\"severity severity-high\">HIGH</span>" +
-                "<p>" + .description + "</p>" +
-                "</div>"' "$temp_high" >> "$temp_html" 2>/dev/null
-        fi
-
-        # Medium severity
-        if [[ $medium_count -gt 0 ]]; then
-            cat >> "$temp_html" <<'MEDIUM_HEADER'
-    <h3 style="color: #ffc107;">🟡 Medium Priority</h3>
-MEDIUM_HEADER
-            jq -r '.[] |
-                "<div class=\"suggestion\" style=\"border-left-color: #ffc107;\">" +
-                "<span class=\"suggestion-id\">" + .id + "</span>" +
-                " <span class=\"severity severity-medium\">MEDIUM</span>" +
-                "<p>" + .description + "</p>" +
-                "</div>"' "$temp_medium" >> "$temp_html" 2>/dev/null
-        fi
-
-        # Low severity
-        if [[ $low_count -gt 0 ]]; then
-            cat >> "$temp_html" <<'LOW_HEADER'
-    <h3 style="color: #17a2b8;">🔵 Low Priority</h3>
-LOW_HEADER
-            jq -r '.[] |
-                "<div class=\"suggestion\" style=\"border-left-color: #17a2b8;\">" +
-                "<span class=\"suggestion-id\">" + .id + "</span>" +
-                " <span class=\"severity severity-low\">LOW</span>" +
-                "<p>" + .description + "</p>" +
-                "</div>"' "$temp_low" >> "$temp_html" 2>/dev/null
-        fi
-
-        # Unspecified
-        if [[ $unspecified_count -gt 0 ]]; then
-            cat >> "$temp_html" <<'UNSPECIFIED_HEADER'
-    <h3 style="color: #6c757d;">⚪ Other Findings</h3>
-UNSPECIFIED_HEADER
-            jq -r '.[] |
-                "<div class=\"suggestion\" style=\"border-left-color: #6c757d;\">" +
-                "<span class=\"suggestion-id\">" + .id + "</span>" +
-                " <span class=\"severity severity-unspecified\">UNSPECIFIED</span>" +
-                "<p>" + .description + "</p>" +
-                "</div>"' "$temp_unspecified" >> "$temp_html" 2>/dev/null
-        fi
-    else
-        echo '<div class="no-issues">✓ No suggestions. System is well configured!</div>' >> "$temp_html"
-    fi
-
-    # Cleanup temp files
-    rm -f "$temp_critical" "$temp_high" "$temp_medium" "$temp_low" "$temp_unspecified"
-    rm -f "${temp_critical}.tmp" "${temp_high}.tmp" "${temp_medium}.tmp" "${temp_low}.tmp" "${temp_unspecified}.tmp"
-
-    # Add footer
-    cat >> "$temp_html" <<'HTML_FOOTER'
-    <div class="footer">
-        <p>Generated by Honeybadger - Personal Device Audit Tool</p>
-        <p>🦡 Make your computer as tough as a honeybadger</p>
-        <p><a href="https://github.com/wearetechnative/personal-device-audit">github.com/wearetechnative/personal-device-audit</a></p>
-    </div>
-</body>
-</html>
-HTML_FOOTER
-
-    # Always save HTML
-    cp "$temp_html" "$output_html"
-    echo "✓ HTML report generated: $output_html"
-
-    # Try to convert HTML to PDF using Docker container with wkhtmltopdf
-    echo "Converting HTML to PDF using Docker..."
-    local html_dir=$(dirname "$output_html")
-    local html_filename=$(basename "$output_html")
-    local pdf_filename=$(basename "$output_pdf")
-
-    docker run --rm \
-        -v "$html_dir:/data:rw" \
-        --entrypoint /usr/local/bin/wkhtmltopdf \
-        wearetechnative/lynis-report-converter:latest \
-        --quiet --enable-local-file-access \
-        "/data/$html_filename" "/data/$pdf_filename" >/dev/null 2>&1
-
-    # Check if PDF was successfully created
-    if [[ -f "$output_pdf" ]]; then
-        # Fix ownership (Docker runs as root, so PDF is owned by root)
-        chmod 644 "$output_pdf" 2>/dev/null || true
-        chown --reference="$output_html" "$output_pdf" 2>/dev/null || true
-        echo "✓ PDF report generated: $output_pdf"
-    else
-        echo "⚠ PDF conversion failed, HTML version available at: $output_html"
-    fi
-
-    # Cleanup
-    rm -f "$temp_html"
-    return 0
-}
 
 # ==============================================================================
 # Server Report Submission Functions
@@ -1618,4 +1249,856 @@ submit_all_reports() {
         echo "All submissions failed"
         return 1
     fi
+}
+
+# ==============================================================================
+# ISO27001 COMPLIANCE CHECK FUNCTIONS
+# ==============================================================================
+
+# Check disk encryption status from blockdevices.txt
+# Usage: check_disk_encryption <output_dir>
+# Returns: "Yes (LUKS)" | "Yes (LUKS2)" | "No" | "Unknown"
+check_disk_encryption() {
+    local output_dir="$1"
+    local blockdevices_file="$output_dir/blockdevices.txt"
+
+    if [[ ! -f "$blockdevices_file" ]]; then
+        echo "Unknown"
+        return 1
+    fi
+
+    if grep -q "crypto_LUKS" "$blockdevices_file"; then
+        # Check if LUKS2 specifically
+        if grep -q "crypto_LUKS 2" "$blockdevices_file"; then
+            echo "Yes (LUKS2)"
+        else
+            echo "Yes (LUKS)"
+        fi
+        return 0
+    else
+        echo "No"
+        return 1
+    fi
+}
+
+# Check screen lock status from screenlock-info.txt
+# Usage: check_screen_lock_status <output_dir>
+# Returns: "Yes (Auto-lock: X minutes)" | "Disabled" | "Timeout too long (X minutes)" | "Unknown"
+check_screen_lock_status() {
+    local output_dir="$1"
+    local screenlock_file="$output_dir/screenlock-info.txt"
+
+    if [[ ! -f "$screenlock_file" ]]; then
+        echo "Unknown"
+        return 1
+    fi
+
+    if grep -q "AUTO-LOCK-STATUS: ENABLED" "$screenlock_file"; then
+        # Extract timeout in minutes
+        local timeout_line=$(grep "Total time until auto-lock:" "$screenlock_file" | grep -oP '\([0-9]+ minutes\)' | tr -d '()')
+        if [[ -z "$timeout_line" ]]; then
+            timeout_line=$(grep "Auto-lock timeout:" "$screenlock_file" | grep -oP '[0-9]+ minutes' | head -1)
+        fi
+
+        if [[ -n "$timeout_line" ]]; then
+            local minutes=$(echo "$timeout_line" | grep -oP '[0-9]+')
+            if [[ $minutes -le 15 ]]; then
+                echo "Yes (Auto-lock: $timeout_line)"
+                return 0
+            else
+                echo "Timeout too long ($timeout_line)"
+                return 1
+            fi
+        else
+            echo "Yes (Auto-lock enabled)"
+            return 0
+        fi
+    else
+        echo "Disabled"
+        return 1
+    fi
+}
+
+# Check for active iptables firewall rules
+# Usage: check_iptables_firewall
+# Returns: 0 if active firewall detected, 1 otherwise
+# Detects: NixOS nixos-fw chain + generic non-empty iptables rulesets
+check_iptables_firewall() {
+    # Check if iptables command is available
+    if ! command -v iptables >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Check for NixOS nixos-fw chain (common on NixOS systems)
+    if sudo iptables -L nixos-fw -n >/dev/null 2>&1; then
+        local nixos_fw_rules=$(sudo iptables -L nixos-fw -n 2>/dev/null | grep -v "^Chain" | grep -v "^target" | wc -l)
+        if [[ $nixos_fw_rules -gt 0 ]]; then
+            return 0  # Active NixOS firewall detected
+        fi
+    fi
+
+    # Check for generic iptables rules (non-default chains or rules)
+    # Look for INPUT chain with actual rules (not just policy)
+    local input_rules=$(sudo iptables -L INPUT -n 2>/dev/null | grep -v "^Chain" | grep -v "^target" | wc -l)
+    if [[ $input_rules -gt 0 ]]; then
+        return 0  # Active iptables rules detected
+    fi
+
+    return 1  # No active firewall detected
+}
+
+# Check for active nftables firewall rules
+# Usage: check_nftables_firewall
+# Returns: 0 if active firewall detected, 1 otherwise
+check_nftables_firewall() {
+    # Check if nft command is available
+    if ! command -v nft >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Check for any nftables ruleset
+    local nft_rules=$(sudo nft list ruleset 2>/dev/null | grep -v "^$" | wc -l)
+    if [[ $nft_rules -gt 0 ]]; then
+        return 0  # Active nftables rules detected
+    fi
+
+    return 1  # No active nftables detected
+}
+
+# Check firewall status from lynis-report.json with fallback detection
+# Usage: check_firewall_status <output_dir>
+# Returns: "Yes" | "No" | "Unknown"
+# Exit code: 0 if firewall active, 1 otherwise
+#
+# Detection strategy:
+# 1. Primary: Check Lynis firewall_active field
+# 2. Fallback (if Lynis reports 0): Direct iptables/nftables check
+#    - Detects NixOS nixos-fw chain
+#    - Detects custom iptables/nftables configurations
+check_firewall_status() {
+    local output_dir="$1"
+    local lynis_file="$output_dir/lynis-report.json"
+
+    if [[ ! -f "$lynis_file" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "Unknown"
+        return 1
+    fi
+
+    # Primary detection: Lynis firewall_active field
+    local firewall_active=$(jq -r '.firewall_active // "0"' "$lynis_file" 2>/dev/null)
+
+    if [[ "$firewall_active" == "1" ]]; then
+        echo "Yes"
+        return 0
+    fi
+
+    # Fallback detection: Direct iptables/nftables check
+    # Only runs when Lynis reports no firewall (eliminates false negatives)
+    if check_iptables_firewall 2>/dev/null; then
+        echo "Yes (iptables)"
+        return 0
+    fi
+
+    if check_nftables_firewall 2>/dev/null; then
+        echo "Yes (nftables)"
+        return 0
+    fi
+
+    # No firewall detected by either method
+    echo "No"
+    return 1
+}
+
+# Detect if system is NixOS
+# Usage: is_nixos <output_dir>
+# Returns: 0 if NixOS, 1 otherwise
+is_nixos() {
+    local output_dir="$1"
+
+    # Check lynis-report.json first (most authoritative)
+    if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
+        local os_name=$(jq -r '.os_name // ""' "$output_dir/lynis-report.json" 2>/dev/null)
+        if [[ "$os_name" =~ "NixOS" ]]; then
+            return 0
+        fi
+    fi
+
+    # Fallback: check neofetch.json
+    if [[ -f "$output_dir/neofetch.json" ]] && command -v jq >/dev/null 2>&1; then
+        local os=$(jq -r '.os // ""' "$output_dir/neofetch.json" 2>/dev/null)
+        if [[ "$os" =~ "NixOS" ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Check NixOS supply chain security status
+# Usage: check_nixos_supply_chain <output_dir>
+# Returns: Status string (PASS/FAIL/Unknown)
+# Exit code: 0 if PASS, 1 if FAIL or Unknown
+#
+# Also sets global variables for detailed reporting:
+#   NIXOS_SUPPLY_CHAIN_STATUS - PASS/FAIL/Unknown
+#   NIXOS_SUPPLY_CHAIN_ISSUES - Array of failure reasons (if FAIL)
+#   NIXOS_SUPPLY_CHAIN_STORE_OK - true/false/unknown (store integrity)
+check_nixos_supply_chain() {
+    local output_dir="$1"
+    local audit_file="$output_dir/nix-supply-chain-audit.txt"
+
+    # Return Unknown if audit file doesn't exist
+    if [[ ! -f "$audit_file" ]]; then
+        NIXOS_SUPPLY_CHAIN_STATUS="Unknown"
+        NIXOS_SUPPLY_CHAIN_ISSUES=()
+        NIXOS_SUPPLY_CHAIN_STORE_OK="unknown"
+        echo "Unknown"
+        return 1
+    fi
+
+    # Parse result from audit output
+    if grep -q "Result: PASS" "$audit_file" 2>/dev/null; then
+        NIXOS_SUPPLY_CHAIN_STATUS="PASS"
+        NIXOS_SUPPLY_CHAIN_ISSUES=()
+
+        # Extract store integrity status
+        if grep -q "Store integrity: OK" "$audit_file" 2>/dev/null; then
+            NIXOS_SUPPLY_CHAIN_STORE_OK="true"
+        else
+            NIXOS_SUPPLY_CHAIN_STORE_OK="false"
+        fi
+
+        echo "PASS"
+        return 0
+
+    elif grep -q "Result: FAIL" "$audit_file" 2>/dev/null; then
+        NIXOS_SUPPLY_CHAIN_STATUS="FAIL"
+
+        # Extract failure reasons from "Issues identified:" section
+        NIXOS_SUPPLY_CHAIN_ISSUES=()
+        local in_issues=false
+        while IFS= read -r line; do
+            if [[ "$line" =~ "Issues identified:" ]]; then
+                in_issues=true
+                continue
+            fi
+            if $in_issues; then
+                # Stop at empty line or next section
+                if [[ -z "$line" ]] || [[ "$line" =~ ^=== ]]; then
+                    break
+                fi
+                # Extract issue (remove leading "- ")
+                local issue=$(echo "$line" | sed 's/^- //')
+                if [[ -n "$issue" ]]; then
+                    NIXOS_SUPPLY_CHAIN_ISSUES+=("$issue")
+                fi
+            fi
+        done < "$audit_file"
+
+        # Extract store integrity status
+        if grep -q "Store integrity: OK" "$audit_file" 2>/dev/null; then
+            NIXOS_SUPPLY_CHAIN_STORE_OK="true"
+        elif grep -q "Store integrity: WARNING" "$audit_file" 2>/dev/null; then
+            NIXOS_SUPPLY_CHAIN_STORE_OK="false"
+        else
+            NIXOS_SUPPLY_CHAIN_STORE_OK="unknown"
+        fi
+
+        echo "FAIL"
+        return 1
+    else
+        NIXOS_SUPPLY_CHAIN_STATUS="Unknown"
+        NIXOS_SUPPLY_CHAIN_ISSUES=()
+        NIXOS_SUPPLY_CHAIN_STORE_OK="unknown"
+        echo "Unknown"
+        return 1
+    fi
+}
+
+# Check hardening score from lynis-report.json
+# Usage: check_hardening_score <output_dir>
+# Returns: score value (0-100) or "Unknown"
+# Exit code: always 0 (informational only, no pass/fail)
+check_hardening_score() {
+    local output_dir="$1"
+    local lynis_file="$output_dir/lynis-report.json"
+
+    if [[ ! -f "$lynis_file" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "Unknown"
+        return 0
+    fi
+
+    local score=$(jq -r '.hardening_index // "Unknown"' "$lynis_file" 2>/dev/null)
+
+    if [[ "$score" == "Unknown" ]] || [[ ! "$score" =~ ^[0-9]+$ ]]; then
+        echo "Unknown"
+        return 0
+    fi
+
+    echo "$score"
+    return 0
+}
+
+# Check for vulnerable packages from lynis-report.json
+# Usage: check_vulnerable_packages <output_dir>
+# Returns: "None" | "Yes" | "Unknown"
+check_vulnerable_packages() {
+    local output_dir="$1"
+    local lynis_file="$output_dir/lynis-report.json"
+
+    if [[ ! -f "$lynis_file" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "Unknown"
+        return 1
+    fi
+
+    # Check if PKGS-7392 warning exists
+    local has_pkgs_7392=$(jq -r '.["warning[]"] | to_entries[] | select(.value | contains("PKGS-7392")) | .key' "$lynis_file" 2>/dev/null)
+
+    if [[ -n "$has_pkgs_7392" ]]; then
+        echo "Yes"
+        return 1
+    else
+        echo "None"
+        return 0
+    fi
+}
+
+# Check if Lynis scan file exists
+# Usage: check_lynis_scan_exists <output_dir>
+# Returns: "Yes" | "No"
+check_lynis_scan_exists() {
+    local output_dir="$1"
+    local lynis_file="$output_dir/lynis-report.json"
+
+    if [[ -f "$lynis_file" ]]; then
+        echo "Yes"
+        return 0
+    else
+        echo "No"
+        return 1
+    fi
+}
+
+# ==============================================================================
+# LYNIS SEVERITY CLASSIFICATION FUNCTIONS
+# ==============================================================================
+
+# Classify Lynis finding by severity level using keyword-based matching
+# Usage: classify_lynis_severity <test_id> <finding_type> <description>
+# Arguments:
+#   test_id: Lynis test ID (e.g., "PKGS-7392")
+#   finding_type: "warning" or "suggestion"
+#   description: Finding description text
+# Returns: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
+#
+# Severity mapping (ISO27001, NIST, vulnerability management best practices):
+# - CRITICAL: Immediate security risk, fix binnen 1 week
+#   * Test ID PKGS-7392 (vulnerable packages)
+#   * Warnings with critical keywords
+# - HIGH: Security-impacting, fix binnen 1 week
+#   * All other warnings
+#   * Suggestions with high-priority keywords
+# - MEDIUM: Configuration hardening, fix binnen 1 maand
+#   * Default for suggestions
+# - LOW: Optional improvements, best effort
+#   * Suggestions with low-priority keywords
+classify_lynis_severity() {
+    local test_id="$1"
+    local finding_type="$2"
+    local description="$3"
+
+    # Convert to lowercase for case-insensitive matching
+    local desc_lower=$(echo "$description" | tr '[:upper:]' '[:lower:]')
+
+    # CRITICAL: Known critical test IDs
+    if [[ "$test_id" == "PKGS-7392" ]]; then
+        echo "CRITICAL"
+        return 0
+    fi
+
+    # CRITICAL: Warnings with critical keywords
+    if [[ "$finding_type" == "warning" ]]; then
+        if matches_keywords "$desc_lower" "vulnerable unpatched outdated exposed no_encryption no_firewall authentication_failed"; then
+            echo "CRITICAL"
+            return 0
+        fi
+        # All other warnings are HIGH
+        echo "HIGH"
+        return 0
+    fi
+
+    # For suggestions: check keyword patterns
+    if [[ "$finding_type" == "suggestion" ]]; then
+        # LOW: Low-priority keywords
+        if matches_keywords "$desc_lower" "consider optional recommended"; then
+            echo "LOW"
+            return 0
+        fi
+
+        # HIGH: High-priority keywords
+        if matches_keywords "$desc_lower" "kernel ssh remote permissions access_control update patch"; then
+            echo "HIGH"
+            return 0
+        fi
+
+        # MEDIUM: Default for suggestions
+        echo "MEDIUM"
+        return 0
+    fi
+
+    # Fallback
+    echo "MEDIUM"
+    return 0
+}
+
+# Helper function for case-insensitive keyword matching
+# Usage: matches_keywords <text> <keywords>
+# Arguments:
+#   text: Lowercase text to search in
+#   keywords: Space-separated list of keywords (use underscore for spaces in keywords)
+# Returns: 0 if any keyword matches, 1 otherwise
+matches_keywords() {
+    local text="$1"
+    local keywords="$2"
+
+    # Convert keywords to array
+    local keyword_array=($keywords)
+
+    for keyword in "${keyword_array[@]}"; do
+        # Replace underscore with space for multi-word keywords
+        local pattern="${keyword//_/ }"
+
+        if echo "$text" | grep -q "$pattern"; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# ==============================================================================
+# ISO27001 COMPLIANCE REPORT GENERATION
+# ==============================================================================
+
+# Generate ISO27001 compliance report
+# Usage: generate_compliance_report <output_dir>
+# Generates: honeybadger-{user}-{date}-compliance.md
+generate_compliance_report() {
+    local output_dir="$1"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Directory $output_dir does not exist" >&2
+        return 1
+    fi
+
+    # Extract username and date from output directory name
+    # Format: output-{hostname}-{user}-{date}
+    local dirname=$(basename "$output_dir")
+    local report_file=""
+
+    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
+        local hostname="${BASH_REMATCH[1]}"
+        local username="${BASH_REMATCH[2]}"
+        local datepart="${BASH_REMATCH[3]}"
+        report_file="honeybadger-${username}-${datepart}-compliance.md"
+    else
+        # Fallback
+        report_file="honeybadger-compliance-$(date +%d-%m-%Y).md"
+    fi
+
+    # Run compliance checks
+    # Note: Capture exit code AFTER each function call, not on same line as local declaration
+    local disk_enc
+    disk_enc=$(check_disk_encryption "$output_dir")
+    local disk_enc_status=$?
+
+    local screen_lock
+    screen_lock=$(check_screen_lock_status "$output_dir")
+    local screen_lock_status=$?
+
+    local firewall
+    firewall=$(check_firewall_status "$output_dir")
+    local firewall_status=$?
+
+    local hardening
+    hardening=$(check_hardening_score "$output_dir")
+
+    local vulnerable_pkgs
+    vulnerable_pkgs=$(check_vulnerable_packages "$output_dir")
+    local vulnerable_status=$?
+
+    local lynis_exists
+    lynis_exists=$(check_lynis_scan_exists "$output_dir")
+
+    # Check NixOS supply chain security (if NixOS)
+    local nixos_supply_chain=""
+    local nixos_supply_chain_status=1
+    if is_nixos "$output_dir"; then
+        nixos_supply_chain=$(check_nixos_supply_chain "$output_dir")
+        nixos_supply_chain_status=$?
+    fi
+
+    # Get hostname and OS info from lynis-report.json if available
+    local hostname="Unknown"
+    local os_full="Unknown"
+    local scan_date="Unknown"
+
+    if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
+        hostname=$(jq -r '.hostname // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        os_full=$(jq -r '.os_fullname // .os_name // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        scan_date=$(jq -r '.report_datetime_start // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+    fi
+
+    # Calculate overall compliance status
+    local compliance_status=""
+    local critical_issues=()
+
+    # Critical checks
+    if [[ $disk_enc_status -ne 0 ]] || [[ "$disk_enc" == "No" ]]; then
+        critical_issues+=("Geen disk encryptie")
+    fi
+    if [[ $firewall_status -ne 0 ]] || [[ "$firewall" == "No" ]]; then
+        critical_issues+=("Geen firewall")
+    fi
+    if [[ $vulnerable_status -ne 0 ]] || [[ "$vulnerable_pkgs" == "Yes" ]]; then
+        critical_issues+=("Kwetsbare software")
+    fi
+    if is_nixos "$output_dir" && [[ $nixos_supply_chain_status -ne 0 ]] || [[ "$nixos_supply_chain" == "FAIL" ]]; then
+        critical_issues+=("Insecure NixOS supply chain")
+    fi
+
+    # Determine overall status
+    if [[ ${#critical_issues[@]} -gt 0 ]]; then
+        compliance_status="❌ Niet compliant"
+    elif [[ $screen_lock_status -ne 0 ]] || [[ "$screen_lock" == "Disabled" ]]; then
+        compliance_status="⚠️ Gedeeltelijk compliant"
+    else
+        compliance_status="✅ Compliant"
+    fi
+
+    # Calculate deadline (scan date + 1 week if critical issues)
+    local deadline="N.A."
+    if [[ ${#critical_issues[@]} -gt 0 ]]; then
+        if [[ "$scan_date" != "Unknown" ]]; then
+            # Parse scan date and add 7 days
+            local scan_epoch=$(date -d "$scan_date" +%s 2>/dev/null || echo "")
+            if [[ -n "$scan_epoch" ]]; then
+                local deadline_epoch=$((scan_epoch + 604800))  # 7 days in seconds
+                deadline=$(date -d "@$deadline_epoch" +"%Y-%m-%d" 2>/dev/null || echo "1 week from scan")
+            else
+                deadline="1 week from scan"
+            fi
+        else
+            deadline="1 week from scan"
+        fi
+    fi
+
+    # Pre-calculate status icons to avoid issues with command substitution in heredoc
+    local disk_icon=$(status_icon $disk_enc_status)
+    local screen_icon=$(status_icon $screen_lock_status)
+    local firewall_icon=$(status_icon $firewall_status)
+    local lynis_icon=$(status_icon $([ "$lynis_exists" == "Yes" ] && echo 0 || echo 1))
+    local vuln_icon=$(status_icon $vulnerable_status)
+    local nixos_supply_icon=""
+    if is_nixos "$output_dir"; then
+        nixos_supply_icon=$(status_icon $nixos_supply_chain_status)
+    fi
+
+    # Generate the report
+    cat > "$report_file" <<EOF
+# ISO27001 Laptop Compliance Report
+
+**Eigenaar:** ${username:-Unknown}
+**Hostname:** $hostname
+**Scan datum:** $scan_date
+**OS:** $os_full
+
+---
+
+## 📋 Compliance Checklist
+
+| Vereiste (ISO27001) | Status | Bevinding |
+|---------------------|--------|-----------|
+| Disk encryptie | $disk_icon | $disk_enc |
+| Screen lock | $screen_icon | $screen_lock |
+| Firewall | $firewall_icon | $firewall |
+| Lynis malware scan | $lynis_icon | $lynis_exists |
+| MFA remote access | ⚠️ | Niet geverifieerd in scan |
+| Kwetsbare software | $vuln_icon | $vulnerable_pkgs |
+| Hardening score | ℹ️ | $hardening/100 |
+EOF
+
+    # Add NixOS supply chain row if system is NixOS
+    if is_nixos "$output_dir"; then
+        local supply_chain_display="$nixos_supply_chain"
+        if [[ "$nixos_supply_chain" == "PASS" ]]; then
+            supply_chain_display="Secure (signatures enforced)"
+        elif [[ "$nixos_supply_chain" == "FAIL" ]]; then
+            supply_chain_display="Insecure"
+        fi
+        cat >> "$report_file" <<EOF
+| NixOS Supply Chain | $nixos_supply_icon | $supply_chain_display |
+EOF
+    fi
+
+    cat >> "$report_file" <<EOF
+
+---
+
+## 💻 Systeeminformatie
+
+EOF
+
+    # Include OS/Kernel status if available
+    if [[ -f "$output_dir/os-kernel-status.txt" ]]; then
+        echo "### OS & Kernel Status" >> "$report_file"
+        echo "" >> "$report_file"
+        echo '```' >> "$report_file"
+        cat "$output_dir/os-kernel-status.txt" >> "$report_file"
+        echo '```' >> "$report_file"
+        echo "" >> "$report_file"
+    fi
+
+    # Include Asset Inventory if available
+    if [[ -f "$output_dir/asset-inventory.txt" ]]; then
+        echo "### Asset Inventory" >> "$report_file"
+        echo "" >> "$report_file"
+        echo '```' >> "$report_file"
+        cat "$output_dir/asset-inventory.txt" >> "$report_file"
+        echo '```' >> "$report_file"
+        echo "" >> "$report_file"
+    fi
+
+    # Include NixOS Supply Chain Audit if available
+    if is_nixos "$output_dir" && [[ -f "$output_dir/nix-supply-chain-audit.txt" ]]; then
+        echo "### NixOS Supply Chain Audit" >> "$report_file"
+        echo "" >> "$report_file"
+        echo '```' >> "$report_file"
+        cat "$output_dir/nix-supply-chain-audit.txt" >> "$report_file"
+        echo '```' >> "$report_file"
+        echo "" >> "$report_file"
+    fi
+
+    cat >> "$report_file" <<EOF
+---
+
+## 🔴 Acties Vereist
+
+EOF
+
+    # Add action summary from lynis findings
+    if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
+        # Count findings by severity (will be done by generate_lynis_actions_report)
+        # For now, just reference the actions file
+        echo "Zie \`${report_file/compliance/actions}\` voor gedetailleerde actielijst." >> "$report_file"
+        echo "" >> "$report_file"
+    fi
+
+    # Critical issues
+    if [[ ${#critical_issues[@]} -gt 0 ]]; then
+        echo "### Kritiek (binnen 1 week)" >> "$report_file"
+        for issue in "${critical_issues[@]}"; do
+            echo "- [ ] $issue" >> "$report_file"
+        done
+        echo "" >> "$report_file"
+    fi
+
+    cat >> "$report_file" <<EOF
+---
+
+## 📊 Samenvatting
+
+**Compliance:** $compliance_status
+**Blocker:** ${critical_issues[0]:-Geen}
+**Deadline:** $deadline
+
+---
+
+*Rapport volgens TN-ISO27-EN-PLCY-05.00 (sectie 3.2, 7.1, 8.1)*
+EOF
+
+    echo "✓ Compliance report generated: $report_file"
+    return 0
+}
+
+# Helper function to generate status icons
+# Usage: status_icon <exit_code>
+# Returns: ✅ for 0, ❌ for non-zero
+status_icon() {
+    if [[ $1 -eq 0 ]]; then
+        echo "✅"
+    else
+        echo "❌"
+    fi
+}
+
+# ==============================================================================
+# LYNIS ACTIONS REPORT GENERATION
+# ==============================================================================
+
+# Generate Lynis security actions report organized by severity
+# Usage: generate_lynis_actions_report <output_dir>
+# Generates: honeybadger-{user}-{date}-actions.md
+generate_lynis_actions_report() {
+    local output_dir="$1"
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "ERROR: Directory $output_dir does not exist" >&2
+        return 1
+    fi
+
+    local lynis_file="$output_dir/lynis-report.json"
+    if [[ ! -f "$lynis_file" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: lynis-report.json not found or jq not available" >&2
+        return 1
+    fi
+
+    # Extract username and date from output directory name
+    local dirname=$(basename "$output_dir")
+    local report_file=""
+
+    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
+        local hostname="${BASH_REMATCH[1]}"
+        local username="${BASH_REMATCH[2]}"
+        local datepart="${BASH_REMATCH[3]}"
+        report_file="honeybadger-${username}-${datepart}-actions.md"
+    else
+        report_file="honeybadger-actions-$(date +%d-%m-%Y).md"
+    fi
+
+    # Get metadata
+    local hostname=$(jq -r '.hostname // "Unknown"' "$lynis_file" 2>/dev/null)
+    local scan_date=$(jq -r '.report_datetime_start // "Unknown"' "$lynis_file" 2>/dev/null)
+
+    # Extract warnings and suggestions
+    local temp_findings="/tmp/lynis-findings-$$.json"
+
+    jq -r '
+        ((.["warning[]"] // []) | to_entries | map({
+            test_id: (.key | tostring),
+            type: "warning",
+            description: .value
+        })) +
+        ((.["suggestion[]"] // []) | to_entries | map({
+            test_id: .value.id // (.key | tostring),
+            type: "suggestion",
+            description: .value.description // .value
+        }))
+    ' "$lynis_file" > "$temp_findings" 2>/dev/null
+
+    # Classify findings by severity
+    declare -A severity_counts
+    declare -A severity_findings
+    severity_counts[CRITICAL]=0
+    severity_counts[HIGH]=0
+    severity_counts[MEDIUM]=0
+    severity_counts[LOW]=0
+
+    while IFS= read -r finding; do
+        local test_id=$(echo "$finding" | jq -r '.test_id')
+        local type=$(echo "$finding" | jq -r '.type')
+        local description=$(echo "$finding" | jq -r '.description')
+
+        local severity=$(classify_lynis_severity "$test_id" "$type" "$description")
+
+        severity_counts[$severity]=$((${severity_counts[$severity]} + 1))
+        severity_findings[$severity]+="$finding"$'\n'
+    done < <(jq -c '.[]' "$temp_findings" 2>/dev/null)
+
+    # Only report CRITICAL and HIGH (exclude MEDIUM and LOW for focus)
+    local total=$((${severity_counts[CRITICAL]} + ${severity_counts[HIGH]}))
+
+    # Generate report
+    cat > "$report_file" <<EOF
+# Lynis Security Actions
+
+**Scan datum:** $scan_date
+**Hostname:** $hostname
+**Totaal:** $total acties (${severity_counts[CRITICAL]} Critical, ${severity_counts[HIGH]} High)
+
+*Note: Medium en Low severity findings zijn niet opgenomen in dit rapport (focus op urgente items)*
+
+---
+
+EOF
+
+    # Check if there are any CRITICAL/HIGH findings
+    if [[ $total -eq 0 ]]; then
+        cat >> "$report_file" <<EOF
+## ✅ Geen Security Findings
+
+Geen warnings of suggestions gevonden. Systeem is goed geconfigureerd!
+
+---
+
+*Zie compliance report voor overall status*
+EOF
+        rm -f "$temp_findings"
+        echo "✓ Actions report generated: $report_file (no findings)"
+        return 0
+    fi
+
+    # Generate sections by severity (only CRITICAL and HIGH - Medium/Low excluded for focus)
+    for severity in CRITICAL HIGH; do
+        local count=${severity_counts[$severity]}
+        if [[ $count -eq 0 ]]; then
+            continue
+        fi
+
+        # Determine icon and deadline
+        local icon=""
+        local deadline=""
+        case $severity in
+            CRITICAL)
+                icon="🔴"
+                deadline="(fix binnen 1 week)"
+                ;;
+            HIGH)
+                icon="🟠"
+                deadline="(fix binnen 1 week)"
+                ;;
+            MEDIUM)
+                icon="🟡"
+                deadline="(fix binnen 1 maand)"
+                ;;
+            LOW)
+                icon="🟢"
+                deadline="(best effort)"
+                ;;
+        esac
+
+        cat >> "$report_file" <<EOF
+## $icon $severity $deadline
+
+EOF
+
+        # Output findings for this severity
+        echo "${severity_findings[$severity]}" | while IFS= read -r finding_json; do
+            if [[ -z "$finding_json" ]]; then
+                continue
+            fi
+
+            local test_id=$(echo "$finding_json" | jq -r '.test_id')
+            local description=$(echo "$finding_json" | jq -r '.description')
+
+            cat >> "$report_file" <<EOF
+### $test_id
+
+$description
+
+EOF
+        done
+
+        echo "---" >> "$report_file"
+        echo "" >> "$report_file"
+    done
+
+    cat >> "$report_file" <<EOF
+
+*Zie compliance report voor overall status*
+EOF
+
+    rm -f "$temp_findings"
+    echo "✓ Actions report generated: $report_file"
+    return 0
 }

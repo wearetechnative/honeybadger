@@ -251,6 +251,19 @@ audit(){
 
      echo "=== End of NixOS System Information ==="
    } > "$output/nixos-system-info.txt" 2>&1
+
+   # Run NixOS supply chain security audit
+   echo "Running NixOS supply chain security audit..."
+   if [[ -x "$thisdir/lib/PKGS-7398-nix-audit.sh" ]]; then
+     # Execute as actual user (not root) to read correct Nix config
+     if sudo -u "${SUDO_USER:-$(whoami)}" "$thisdir/lib/PKGS-7398-nix-audit.sh" > "$output/nix-supply-chain-audit.txt" 2>&1; then
+       echo "  ✅ NixOS supply chain audit completed"
+     else
+       echo "  ⚠️  NixOS supply chain audit failed (non-critical, continuing)"
+     fi
+   else
+     echo "  ⚠️  lib/PKGS-7398-nix-audit.sh not found or not executable"
+   fi
  fi
 
  # Check for screen lock tools
@@ -474,24 +487,8 @@ audit(){
    # Generate asset inventory
    echo "Generating asset inventory..."
    generate_asset_inventory "$output" >/dev/null || echo "  Warning: Could not generate asset inventory"
-
-   # Generate warnings/suggestions report
-   echo "Generating warnings and suggestions report..."
-   generate_warnings_report "$output/lynis-report.json" "$output/lynis-report-warnings_fails" || echo "  Warning: Could not generate warnings report"
  else
    echo "  Skipping OS/kernel analysis (jq not available or lynis report missing)"
- fi
-
- # Generate final consolidated report
- echo "Generating final audit report..."
- if [[ -x "$thisdir/lib/generate-final-report.sh" ]]; then
-   if "$thisdir/lib/generate-final-report.sh" "$output" 2>/dev/null; then
-     echo "  ✅ Final report: $output/final-report.md"
-   else
-     echo "  ⚠️  Warning: Could not generate final report (non-critical)"
-   fi
- else
-   echo "  ⚠️  Warning: generate-final-report.sh not found or not executable"
  fi
 
  tar czf $tarball $output
@@ -641,37 +638,15 @@ check-output(){
    echo "Example: ./RUNME.sh check-output honeybadger-wtoorren-09-02-2026.tar.gz"
    echo "Example: ./RUNME.sh check-output honeybadger-wtoorren-09-02-2026.tar"
    echo ""
-   echo "This command generates a report file: honeybadger-{username}-{date}-report.txt"
+   echo "This command generates ISO27001 compliance reports:"
+   echo "  - honeybadger-{username}-{date}-compliance.md"
+   echo "  - honeybadger-{username}-{date}-actions.md"
    exit 1
  fi
 
  local input="$1"
  local output_dir=""
  local cleanup_extracted=false
- local report_file=""
-
- # Determine report filename based on input
- # Convert any input format to honeybadger-{username}-{date}-report.txt
- if [[ "$input" =~ ^output-(.+)$ ]]; then
-   # Input: output-user-09-02-2026 -> honeybadger-user-09-02-2026-report.txt
-   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
- elif [[ "$input" =~ ^honeybadger-(.+)\.tar\.gz$ ]]; then
-   # Input: honeybadger-user-09-02-2026.tar.gz -> honeybadger-user-09-02-2026-report.txt
-   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
- elif [[ "$input" =~ ^honeybadger-(.+)\.tar$ ]]; then
-   # Input: honeybadger-user-09-02-2026.tar -> honeybadger-user-09-02-2026-report.txt
-   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
- elif [[ "$input" =~ ^honeybadger-(.+)$ ]]; then
-   # Input: honeybadger-user-09-02-2026 -> honeybadger-user-09-02-2026-report.txt
-   report_file="honeybadger-${BASH_REMATCH[1]}-report.txt"
- else
-   # Fallback: use input as-is with -report.txt suffix
-   report_file="${input}-report.txt"
- fi
-
- # Start capturing output to both terminal and report file
- exec > >(tee "$report_file")
- exec 2>&1
 
  # Helper function to extract tarball
  extract_tarball() {
@@ -797,6 +772,16 @@ check-output(){
  echo "Generating asset inventory..."
  generate_asset_inventory "$output_dir"
 
+ # Generate ISO27001 compliance report
+ echo ""
+ echo "Generating ISO27001 compliance report..."
+ generate_compliance_report "$output_dir"
+
+ # Generate Lynis actions report
+ echo ""
+ echo "Generating Lynis actions report..."
+ generate_lynis_actions_report "$output_dir"
+
  # Cleanup extracted directory if we created it
  if [[ "$cleanup_extracted" == true ]]; then
    echo ""
@@ -804,11 +789,16 @@ check-output(){
    rm -rf "$output_dir"
  fi
 
- # Notify user about report file
+ # Notify user about report files
  echo ""
  echo "======================================"
- echo "Report saved to: $report_file"
+ echo "ISO27001 Compliance Reports Generated"
  echo "======================================"
+ echo ""
+ echo "Generated files:"
+ echo "  ✓ honeybadger-*-compliance.md (ISO27001 checklist)"
+ echo "  ✓ honeybadger-*-actions.md (Lynis security actions)"
+ echo ""
 
  exit $exit_code
 }
