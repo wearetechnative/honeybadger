@@ -117,21 +117,119 @@ Systems failing these requirements will be flagged in the `asset-inventory.txt` 
 
 ## Usage on Windows
 
-- download honeybadger as a zip-file from https://github.com/wearetechnative/honeybadger/archive/refs/heads/main.zip
-- extract the zip-file 
-- open a powershell as admin
-- change you directory to the honeybadger directorty you've extracted.
-- check copy full path of the RUNME.ps1 file
-- `powershell -ExecutionPolicy Bypass -File $FULL_PATH_OF_RUNME.ps1`
-- ./RUNME.ps1
+### Prerequisites (Windows 11)
 
-## The results files
+Honeybadger for Windows uses HardeningKitty for security auditing. No additional software installation is required.
 
-When the script has run successfully a zip or tarball with findings is stored in the
-same directory. It looks like this: `honeybadger-pim-28-02-2025.tar.bz2`. Send
-this file to the CISO or the person who asked you to do run this audit script.
+**Optional:** `neofetch` (automatically installed via winget if missing)
 
-The output is available in a bz2 file.
+### Running the Audit
+
+**Important:** Administrator privileges are required for complete system auditing (BitLocker, Windows Defender, some firewall checks).
+
+#### Step 1: Download Honeybadger
+
+Download as ZIP from: https://github.com/wearetechnative/honeybadger/archive/refs/heads/main.zip
+
+Extract to a location like `C:\temp\honeybadger-main`
+
+#### Step 2: Run the Audit
+
+**Option A: Double-click (Easiest)**
+
+1. Navigate to `C:\temp\honeybadger-main`
+2. Right-click on **`RUNME.cmd`**
+3. Select **"Run as administrator"**
+4. Click "Yes" on the UAC prompt
+
+The script will automatically start with the correct settings.
+
+**Option B: Command Line**
+
+1. Press `Windows Key`
+2. Type `cmd`
+3. Right-click on "Command Prompt"
+4. Select **"Run as administrator"**
+5. Run:
+
+```cmd
+cd C:\temp\honeybadger-main
+RUNME.cmd
+```
+
+**Option C: PowerShell (Advanced)**
+
+```powershell
+cd C:\temp\honeybadger-main
+.\AUDIT.ps1
+```
+
+#### Step 3: Submit Report (Optional)
+
+After the audit completes, you can optionally submit the ZIP file to your compliance server:
+
+```powershell
+.\submit-report.ps1
+```
+
+**First time:** Copy `.honeybadger.conf.example` to `.honeybadger.conf` and configure:
+- `SERVER_ENABLED=true`
+- `SERVER_URL=https://your-server.com/api/reports`
+- `SERVER_TOKEN=hb_token_your_token_here`
+
+### Output Files (Windows)
+
+The audit generates reports in `report-<date>/`:
+
+- `honeybadger-<user>-<date>-compliance.md` - ISO27001 compliance report with pass/fail status
+- `honeybadger-<user>-<date>-actions.md` - Prioritized security remediation items
+- `hardeningkitty.csv` - Detailed HardeningKitty audit results
+- `honeybadger-<hostname>-<user>-<date>.zip` - ZIP archive containing all reports (created automatically)
+
+### What Gets Audited (Windows)
+
+- **BitLocker Encryption** - Full disk encryption status and protection status (detects suspended BitLocker)
+- **Screen Lock Settings** - Screensaver timeout, power management, lock policies
+- **Windows Firewall** - Domain, Private, and Public profile status
+- **Windows Update** - Last update date and compliance status (<14 days compliant, 14-30 days warning, >30 days non-compliant)
+- **Windows Defender** - Real-time protection status and definition age
+- **HardeningKitty Security Audit** - 300+ Windows security configuration checks against CIS benchmarks and Microsoft security baselines
+- **Hardware Information** - Serial number, system model, OS version
+
+### Compliance Thresholds (Windows)
+
+| Control | Threshold | Status |
+|---------|-----------|--------|
+| BitLocker | Encrypted AND Protection On | ✅/❌ |
+| Screen Lock | ≤15 minutes + password required | ✅/❌ |
+| Firewall | All profiles enabled | ✅/❌ |
+| OS Updates | <14 days ✅, 14-30 days ⚠️, >30 days ❌ | ✅/⚠️/❌ |
+| Antivirus | Defender enabled + definitions <7 days | ✅/❌ |
+
+### Without Administrator Privileges
+
+The script will run without Administrator privileges but with limited functionality:
+- ✅ HardeningKitty audit (works)
+- ✅ Firewall check (works)
+- ✅ Windows Update check (works)
+- ✅ Screen Lock check (works)
+- ❌ BitLocker check (requires Administrator)
+- ⚠️ Windows Defender check (may be limited)
+
+The script will warn you which checks are unavailable and continue with remaining checks.
+
+## The Result Files
+
+When the script has run successfully, a compressed archive with findings is stored in the same directory:
+
+**Linux/macOS:** `honeybadger-hostname-user-date.tar.bz2` (tarball)
+**Windows:** `honeybadger-hostname-user-date.zip` (ZIP archive)
+
+Send this file to your CISO or the person who requested the audit.
+
+### Submitting Reports
+
+You can also submit reports directly to a centralized compliance server (see Server Report Submission section below).
 
 ## Server Report Submission
 

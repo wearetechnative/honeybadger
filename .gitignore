@@ -9,3 +9,5 @@ lynis.dat
 lib/os-kernel-status.txt
 os-kernel-status.txt
 .honeybadger.conf
+*.zip
+report-**
