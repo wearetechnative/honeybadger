@@ -100,6 +100,7 @@
 - [x] 12.3 Validate report directory was created successfully
 - [x] 12.4 Verify both compliance.md and actions.md were written successfully
 - [x] 12.5 Add final success message with paths to generated reports
+- [x] 12.6 Create ZIP archive of report directory (honeybadger-{hostname}-{user}-{date}.zip)
 
 ## 13. Testing and Documentation
 
