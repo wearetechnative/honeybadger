@@ -175,17 +175,22 @@ if ($script:isAdmin) {
         if ($cDrive) {
             $status = $cDrive.VolumeStatus
             $encryptionPct = $cDrive.EncryptionPercentage
+            $protectionStatus = $cDrive.ProtectionStatus
             $keyProtector = ($cDrive.KeyProtector | ForEach-Object { $_.KeyProtectorType }) -join ", "
 
             # Task 3.3 & 3.4: Parse and determine compliance
-            if ($status -eq "FullyEncrypted" -and $encryptionPct -eq 100) {
+            if ($status -eq "FullyEncrypted" -and $encryptionPct -eq 100 -and $protectionStatus -eq "On") {
                 $script:bitlockerCompliant = $true
                 $script:bitlockerStatus = "✅"
-                $script:bitlockerDetails = "Fully encrypted ($encryptionPct%) - Key Protectors: $keyProtector"
+                $script:bitlockerDetails = "Fully encrypted ($encryptionPct%) - Key Protectors: $keyProtector - Protection: $protectionStatus"
+            } elseif ($status -eq "FullyEncrypted" -and $encryptionPct -eq 100 -and $protectionStatus -ne "On") {
+                $script:bitlockerCompliant = $false
+                $script:bitlockerStatus = "❌"
+                $script:bitlockerDetails = "Encrypted but protection is $protectionStatus (should be On) - BitLocker is suspended!"
             } else {
                 $script:bitlockerCompliant = $false
                 $script:bitlockerStatus = "❌"
-                $script:bitlockerDetails = "Status: $status ($encryptionPct%) - Not fully encrypted"
+                $script:bitlockerDetails = "Status: $status ($encryptionPct%) - Protection: $protectionStatus - Not fully encrypted or protected"
             }
 
             # Task 3.5: Save BitLocker output
@@ -682,6 +687,21 @@ if ((Test-Path $reportPath) -and (Test-Path $actionsPath)) {
         Write-Host "  - HardeningKitty Data: $reportDir\hardeningkitty.csv" -ForegroundColor White
     }
     Write-Host ""
+
+    # Create ZIP archive
+    Write-Host "[*] Creating ZIP archive..." -ForegroundColor Green
+    $zipFileName = "honeybadger-$script:hostname-$script:username-$timestamp.zip"
+    try {
+        Compress-Archive -Path $reportDir -DestinationPath $zipFileName -Force
+        if (Test-Path $zipFileName) {
+            $zipSize = [math]::Round((Get-Item $zipFileName).Length / 1KB, 1)
+            Write-Host "    ✓ ZIP archive created: $zipFileName ($zipSize KB)" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "    WARNING: Failed to create ZIP archive: $_" -ForegroundColor Yellow
+    }
+    Write-Host ""
+
     Write-Host "Review the compliance report for ISO27001 compliance status." -ForegroundColor Green
 } else {
     Write-Host "WARNING: One or more reports failed to generate." -ForegroundColor Yellow
