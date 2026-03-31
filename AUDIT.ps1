@@ -653,7 +653,7 @@ No remediation actions are required at this time.
 
 ## Next Steps
 
-1. Review failed checks by severity (High → Medium → Low)
+1. Review failed checks by severity (High > Medium > Low)
 2. Consult your organization's security policies for remediation guidance
 3. Implement recommended settings via Group Policy or local configuration
 4. Re-run audit after making changes: ``.\RUNME.ps1``
