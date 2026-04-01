@@ -11,3 +11,4 @@ os-kernel-status.txt
 .honeybadger.conf
 *.zip
 report-**
+honeybadger-*md

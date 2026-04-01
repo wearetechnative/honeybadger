@@ -543,8 +543,10 @@ $(if($script:defenderSignatureDate){"**Last Definition Update**: $($script:defen
 
 ## HardeningKitty Security Audit
 
-$(if($script:hkTotalChecks -gt 0){
-@"
+"@
+
+if($script:hkTotalChecks -gt 0){
+    $complianceReport += @"
 **Total Checks**: $script:hkTotalChecks
 **Passed**: $script:hkPassedChecks
 **Failed**: $script:hkFailedChecks (High: $script:hkHighSeverity, Medium: $script:hkMediumSeverity, Low: $script:hkLowSeverity)
@@ -553,8 +555,10 @@ $(if($script:hkTotalChecks -gt 0){
 See ``honeybadger-$script:username-$timestamp-actions.md`` for detailed remediation steps.
 "@
 }else{
-"HardeningKitty audit was not completed. Check script output for errors."
-})
+    $complianceReport += "HardeningKitty audit was not completed. Check script output for errors."
+}
+
+$complianceReport += @"
 
 ---
 
@@ -589,8 +593,10 @@ $actionsReport = @"
 
 ---
 
-$(if($script:hkFailedChecks -gt 0){
-@"
+"@
+
+if($script:hkFailedChecks -gt 0){
+    $actionsReport += @"
 ## Summary
 
 Total failed security checks: **$script:hkFailedChecks**
@@ -602,52 +608,60 @@ Total failed security checks: **$script:hkFailedChecks**
 
 ## High Severity Issues ($script:hkHighSeverity items)
 
-$(if($script:hkHighSeverity -gt 0){
-    ($script:hkFindings.High | ForEach-Object {
-        "**[$($_.ID)]** $($_.Category): $($_.Name)  " +
-        "- **Current**: $($_.Result)  " +
-        "- **Recommended**: $($_.Recommended)  "
-    }) -join "`n`n"
-}else{
-    "No high severity issues found."
-})
+"@
+    if($script:hkHighSeverity -gt 0){
+        $actionsReport += ($script:hkFindings.High | ForEach-Object {
+            "**[$($_.ID)]** $($_.Category): $($_.Name)  " +
+            "- **Current**: $($_.Result)  " +
+            "- **Recommended**: $($_.Recommended)  "
+        }) -join "`n`n"
+    }else{
+        $actionsReport += "No high severity issues found."
+    }
+
+    $actionsReport += @"
 
 ---
 
 ## Medium Severity Issues ($script:hkMediumSeverity items)
 
-$(if($script:hkMediumSeverity -gt 0){
-    ($script:hkFindings.Medium | ForEach-Object {
-        "**[$($_.ID)]** $($_.Category): $($_.Name)  " +
-        "- **Current**: $($_.Result)  " +
-        "- **Recommended**: $($_.Recommended)  "
-    }) -join "`n`n"
-}else{
-    "No medium severity issues found."
-})
+"@
+    if($script:hkMediumSeverity -gt 0){
+        $actionsReport += ($script:hkFindings.Medium | ForEach-Object {
+            "**[$($_.ID)]** $($_.Category): $($_.Name)  " +
+            "- **Current**: $($_.Result)  " +
+            "- **Recommended**: $($_.Recommended)  "
+        }) -join "`n`n"
+    }else{
+        $actionsReport += "No medium severity issues found."
+    }
+
+    $actionsReport += @"
 
 ---
 
 ## Low Severity Issues ($script:hkLowSeverity items)
 
-$(if($script:hkLowSeverity -gt 0){
-    ($script:hkFindings.Low | ForEach-Object {
-        "**[$($_.ID)]** $($_.Category): $($_.Name)  " +
-        "- **Current**: $($_.Result)  " +
-        "- **Recommended**: $($_.Recommended)  "
-    }) -join "`n`n"
-}else{
-    "No low severity issues found."
-})
 "@
+    if($script:hkLowSeverity -gt 0){
+        $actionsReport += ($script:hkFindings.Low | ForEach-Object {
+            "**[$($_.ID)]** $($_.Category): $($_.Name)  " +
+            "- **Current**: $($_.Result)  " +
+            "- **Recommended**: $($_.Recommended)  "
+        }) -join "`n`n"
+    }else{
+        $actionsReport += "No low severity issues found."
+    }
 }else{
-@"
+    $actionsReport += @"
 ## All Security Checks Passed ✅
 
 Congratulations! All HardeningKitty security checks passed.
 No remediation actions are required at this time.
 "@
-})
+}
+
+$actionsReport += @"
 
 ---
 
