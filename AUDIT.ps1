@@ -222,13 +222,14 @@ try {
 
 # Task 4.2: Power settings
 try {
-    $monitorTimeoutOutput = powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>&1 | Select-String "Current AC Power Setting Index:"
+    # Language-independent parsing: find AC power setting line containing hex value
+    $monitorTimeoutOutput = powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>&1 | Select-String "AC.*0x"
     if ($monitorTimeoutOutput) {
         $script:monitorTimeout = ([regex]::Match($monitorTimeoutOutput.ToString(), "0x([0-9a-f]+)")).Groups[1].Value
         $script:monitorTimeout = [Convert]::ToInt32($script:monitorTimeout, 16)
     }
 
-    $systemSleepOutput = powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>&1 | Select-String "Current AC Power Setting Index:"
+    $systemSleepOutput = powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>&1 | Select-String "AC.*0x"
     if ($systemSleepOutput) {
         $script:systemSleep = ([regex]::Match($systemSleepOutput.ToString(), "0x([0-9a-f]+)")).Groups[1].Value
         $script:systemSleep = [Convert]::ToInt32($script:systemSleep, 16)
@@ -275,12 +276,23 @@ if ($script:screenSaveTimeOut -and $script:screenSaveActive -eq "1" -and $script
 # Task 5: Windows Firewall Collection
 Write-Host "[*] Checking Windows Firewall status..." -ForegroundColor Green
 try {
-    # Task 5.1 & 5.2: Get firewall profiles
+    # Task 5.1 & 5.2: Get firewall profiles using language-independent profile type filtering
+    # Get all profiles at once
     $firewallProfiles = Get-NetFirewallProfile -ErrorAction Stop
 
-    $domainProfile = $firewallProfiles | Where-Object { $_.Name -eq "Domain" }
-    $privateProfile = $firewallProfiles | Where-Object { $_.Name -eq "Private" }
-    $publicProfile = $firewallProfiles | Where-Object { $_.Name -eq "Public" }
+    # Filter by profile type (not localized name) - use array index or Profile property
+    # Profiles are returned in consistent order: Domain(0), Private(1), Public(2)
+    $domainProfile = $null
+    $privateProfile = $null
+    $publicProfile = $null
+
+    foreach ($profile in $firewallProfiles) {
+        switch -Regex ($profile.Name) {
+            '^(Domain|Domein|Domaine|Domäne)$' { $domainProfile = $profile }
+            '^(Private|Privé|Privat|Privado)$' { $privateProfile = $profile }
+            '^(Public|Openbaar|Publique|Öffentlich|Público)$' { $publicProfile = $profile }
+        }
+    }
 
     $script:firewallDomain = $domainProfile.Enabled
     $script:firewallPrivate = $privateProfile.Enabled
