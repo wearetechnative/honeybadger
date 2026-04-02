@@ -50,7 +50,7 @@ function deps_missing(){
 }
 
 function checkOS {
-  if [[ $(uname -o)  == *"Linux"* ]]; then 
+  if [[ $(uname -o)  == *"Linux"* ]]; then
     osType="linux"
   elif [[ $(uname -o) == *"Darwin"* ]]; then
     osType="macos"
@@ -90,8 +90,13 @@ audit(){
 
  show_version
  checkOS
+ load_server_config
  checkdeps "lynis" "https://github.com/CISOfy/lynis"
- checkdeps "docker"
+ if [[ "$USE_DOCKER_CONVERTER" == "true" ]]; then
+   checkdeps "docker"
+ else
+   checkdeps "python3"
+ fi
  checkdeps "sed"
  checkdeps "neofetch" "https://github.com/dylanaraps/neofetch"
  checkdeps "tar"
@@ -111,26 +116,32 @@ audit(){
  echo "Running Lynis audit..."
  lynis audit system || { echo "ERROR: Lynis audit failed"; exit 1; }
 
- # Check if Docker image needs rebuild (if Dockerfile is newer than image)
- echo "Checking Docker image..."
- local image_name="wearetechnative/lynis-report-converter:latest"
-
- if ! docker image inspect "$image_name" >/dev/null 2>&1; then
-   echo "Building Docker image (first time)..."
-   docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
- elif [ -f Dockerfile ] && [ Dockerfile -nt "$output" ]; then
-   echo "Dockerfile changed, rebuilding image..."
-   docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
- else
-   echo "Using cached Docker image"
- fi
-
- # Convert Lynis report using optimized container
+ # Convert Lynis report to JSON
  echo "Converting Lynis report to JSON..."
- docker run --rm \
-   --read-only \
-   -v /var/log/lynis-report.dat:/data/lynis-report.dat:ro \
-   "$image_name" 2>/dev/null > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
+ if [[ "$USE_DOCKER_CONVERTER" == "true" ]]; then
+   # Docker-based Perl converter (legacy)
+   local image_name="wearetechnative/lynis-report-converter:latest"
+
+   if ! docker image inspect "$image_name" >/dev/null 2>&1; then
+     echo "Building Docker image (first time)..."
+     docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
+   elif [ -f Dockerfile ] && [ Dockerfile -nt "$output" ]; then
+     echo "Dockerfile changed, rebuilding image..."
+     docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
+   else
+     echo "Using cached Docker image"
+   fi
+
+   docker run --rm \
+     --read-only \
+     -v /var/log/lynis-report.dat:/data/lynis-report.dat:ro \
+     "$image_name" 2>/dev/null > $output/lynis-report.json || { echo "ERROR: Report conversion failed"; exit 1; }
+ else
+   # Python converter (default)
+   python3 "$thisdir/lib/lynis_report_converter.py" \
+     --input-path /var/log/lynis-report.dat \
+     --output-path "$output/lynis-report.json" || { echo "ERROR: Report conversion failed"; exit 1; }
+ fi
  # Run neofetch as actual user (not root) to capture correct username
  sudo -u "${SUDO_USER:-$(whoami)}" neofetch --off --stdout | jq -Rn '
    ([inputs | select(length>0)] |

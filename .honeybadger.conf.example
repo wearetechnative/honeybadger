@@ -22,6 +22,11 @@ SERVER_RETRY_COUNT=3
 # Dry-run mode: log what would be submitted without actual HTTP requests (default: false)
 DRY_RUN=false
 
+# Use Docker-based Perl converter instead of the default Python converter (default: false)
+# Set to true if you need the legacy Perl converter (supports HTML/PDF/Excel output)
+# When false, the Python script (lib/lynis_report_converter.py) is used (JSON only, no Docker required)
+USE_DOCKER_CONVERTER=false
+
 # Note: Configuration files are checked in this order:
 #   1. ./.honeybadger.conf (current directory)
 #   2. ~/.honeybadger.conf (user home directory)

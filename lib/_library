@@ -922,6 +922,7 @@ load_server_config() {
     SERVER_TIMEOUT="${SERVER_TIMEOUT:-30}"
     SERVER_RETRY_COUNT="${SERVER_RETRY_COUNT:-3}"
     DRY_RUN="${DRY_RUN:-false}"
+    USE_DOCKER_CONVERTER="${USE_DOCKER_CONVERTER:-false}"
 
     # Check config files in order
     local config_files=(
