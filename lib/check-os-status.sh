@@ -129,10 +129,13 @@ if [[ -f "$OUTPUT_DIR/lynis-report.json" ]]; then
     fi
 fi
 
-# Fallback to neofetch.json, neofetch.txt or fastfetch.txt
+# Prefer fastfetch.json, fallback to neofetch.json, neofetch.txt or fastfetch.txt
 FETCH_FILE=""
 FETCH_FORMAT=""
-if [[ -f "$OUTPUT_DIR/neofetch.json" ]]; then
+if [[ -f "$OUTPUT_DIR/fastfetch.json" ]]; then
+    FETCH_FILE="$OUTPUT_DIR/fastfetch.json"
+    FETCH_FORMAT="json"
+elif [[ -f "$OUTPUT_DIR/neofetch.json" ]]; then
     FETCH_FILE="$OUTPUT_DIR/neofetch.json"
     FETCH_FORMAT="json"
 elif [[ -f "$OUTPUT_DIR/neofetch.txt" ]]; then
@@ -518,7 +521,7 @@ else
     echo "Detected Kernel: $KERNEL_VERSION" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
 
-    # Parse kernel version (format: X.Y.Z)
+    # Parse kernel version (format: X.Y.Z or X.Y.Z-distro-suffix)
     KERNEL_MAJOR=$(echo "$KERNEL_VERSION" | cut -d. -f1)
     KERNEL_MINOR=$(echo "$KERNEL_VERSION" | cut -d. -f2)
     KERNEL_PATCH=$(echo "$KERNEL_VERSION" | cut -d. -f3 | grep -oP '^\d+')
@@ -526,142 +529,101 @@ else
     echo "Kernel Version: $KERNEL_MAJOR.$KERNEL_MINOR.$KERNEL_PATCH" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
 
+    # Read kernel_latest from fastfetch.json (live data from kernel.org)
+    KERNEL_LATEST=""
+    if [[ -n "$FETCH_FILE" && "$FETCH_FORMAT" == "json" ]] && command -v jq >/dev/null 2>&1; then
+        KERNEL_LATEST=$(jq -r '.kernel_latest // empty' "$FETCH_FILE" 2>/dev/null)
+        # Strip invalid results from curl timeout (e.g. "null (null)")
+        [[ "$KERNEL_LATEST" =~ ^null ]] && KERNEL_LATEST=""
+    fi
+
+    KERNEL_LATEST_VERSION=""
+    KERNEL_LATEST_DATE=""
+    if [[ -n "$KERNEL_LATEST" ]]; then
+        KERNEL_LATEST_VERSION=$(echo "$KERNEL_LATEST" | grep -oP '^\d+\.\d+\.\d+')
+        KERNEL_LATEST_DATE=$(echo "$KERNEL_LATEST" | grep -oP '\d{4}-\d{2}-\d{2}')
+    fi
+
     echo "1. IS CURRENT KERNEL AN ACTIVE UPDATE STREAM?" >> "$REPORT_FILE"
     echo "---------------------------------------------------" >> "$REPORT_FILE"
 
-    # Kernel version database (as of February 2026)
-    # Source: https://kernel.org
-    case "$KERNEL_MAJOR.$KERNEL_MINOR" in
-        6.12)
-            echo "Status: YES - STABLE KERNEL SERIES" >> "$REPORT_FILE"
-            echo "Update Stream: ACTIVE" >> "$REPORT_FILE"
-            echo "Type: Stable" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Series Release: December 2024" >> "$REPORT_FILE"
-            echo "Latest in series: 6.12.x (regularly updated)" >> "$REPORT_FILE"
-            echo "Estimated EOL: ~6-12 months from release" >> "$REPORT_FILE"
-            echo "Support Status: ACTIVELY MAINTAINED" >> "$REPORT_FILE"
-            ;;
-        6.11)
-            echo "Status: NEAR EOL - STABLE" >> "$REPORT_FILE"
-            echo "Update Stream: ACTIVE (limited time)" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Series Release: September 2024" >> "$REPORT_FILE"
-            echo "Estimated EOL: Early 2026" >> "$REPORT_FILE"
-            echo "Support Status: NEAR EOL - UPGRADE RECOMMENDED" >> "$REPORT_FILE"
-            echo "Recommended: Upgrade to 6.12+ kernel" >> "$REPORT_FILE"
-            ;;
-        6.10|6.9|6.8|6.7|6.6)
-            if [[ "$KERNEL_MINOR" == "6" ]]; then
-                echo "Status: YES - LTS KERNEL" >> "$REPORT_FILE"
-                echo "Update Stream: ACTIVE (Long Term Support)" >> "$REPORT_FILE"
-                echo "Type: LTS (Long Term Support)" >> "$REPORT_FILE"
-                echo "" >> "$REPORT_FILE"
-
-                echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-                echo "---------------------------------------------------" >> "$REPORT_FILE"
-                echo "Series Release: December 2023" >> "$REPORT_FILE"
-                echo "EOL Date: December 2026 (projected)" >> "$REPORT_FILE"
-                echo "Support Status: LTS - FULLY SUPPORTED" >> "$REPORT_FILE"
-            else
-                echo "Status: OLD STABLE (likely EOL)" >> "$REPORT_FILE"
-                echo "Update Stream: INACTIVE or near EOL" >> "$REPORT_FILE"
-                echo "" >> "$REPORT_FILE"
-
-                echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-                echo "---------------------------------------------------" >> "$REPORT_FILE"
-                echo "Series Release: 2024" >> "$REPORT_FILE"
-                echo "Support Status: EOL or near EOL" >> "$REPORT_FILE"
-                echo "Recommendation: Update to kernel 6.12+ or 6.6 LTS" >> "$REPORT_FILE"
-            fi
-            ;;
-        6.1)
-            echo "Status: YES - LTS KERNEL" >> "$REPORT_FILE"
-            echo "Update Stream: ACTIVE (Long Term Support)" >> "$REPORT_FILE"
-            echo "Type: LTS" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Series Release: December 2022" >> "$REPORT_FILE"
-            echo "EOL Date: December 2026" >> "$REPORT_FILE"
-            echo "Support Status: LTS - FULLY SUPPORTED" >> "$REPORT_FILE"
-            ;;
-        5.15)
-            echo "Status: YES - LTS KERNEL" >> "$REPORT_FILE"
-            echo "Update Stream: ACTIVE (Long Term Support)" >> "$REPORT_FILE"
-            echo "Type: LTS" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Series Release: October 2021" >> "$REPORT_FILE"
-            echo "EOL Date: October 2026" >> "$REPORT_FILE"
-            echo "Support Status: LTS - FULLY SUPPORTED" >> "$REPORT_FILE"
-            ;;
-        5.10)
-            echo "Status: YES - LTS KERNEL" >> "$REPORT_FILE"
-            echo "Update Stream: ACTIVE (Long Term Support)" >> "$REPORT_FILE"
-            echo "Type: LTS" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Series Release: December 2020" >> "$REPORT_FILE"
-            echo "EOL Date: December 2026" >> "$REPORT_FILE"
-            echo "Support Status: LTS - FULLY SUPPORTED" >> "$REPORT_FILE"
-            ;;
-        5.4)
-            echo "Status: YES - LTS (near EOL)" >> "$REPORT_FILE"
-            echo "Update Stream: ACTIVE (limited time)" >> "$REPORT_FILE"
-            echo "Type: LTS" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Series Release: November 2019" >> "$REPORT_FILE"
-            echo "EOL Date: December 2025" >> "$REPORT_FILE"
-            echo "Support Status: LTS - NEAR EOL" >> "$REPORT_FILE"
-            echo "Recommendation: Plan upgrade to newer LTS kernel" >> "$REPORT_FILE"
-            ;;
-        *)
-            echo "Status: UNKNOWN or VERY OLD" >> "$REPORT_FILE"
-            echo "Update Stream: UNABLE TO DETERMINE" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "2. KERNEL VERSION RELEASE & EOL DATES" >> "$REPORT_FILE"
-            echo "---------------------------------------------------" >> "$REPORT_FILE"
-            echo "Kernel: $KERNEL_MAJOR.$KERNEL_MINOR.$KERNEL_PATCH" >> "$REPORT_FILE"
-            echo "Please check https://kernel.org for current status" >> "$REPORT_FILE"
-
-            if [[ "$KERNEL_MAJOR" -lt 5 ]]; then
-                echo "" >> "$REPORT_FILE"
-                echo "WARNING: Kernel version is very old (< 5.x)" >> "$REPORT_FILE"
-                echo "   This kernel is likely EOL and unsupported" >> "$REPORT_FILE"
-                echo "   CRITICAL: Upgrade immediately for security updates" >> "$REPORT_FILE"
-            fi
-            ;;
-    esac
+    if [[ -n "$KERNEL_LATEST_VERSION" ]]; then
+        echo "Status: YES - UPSTREAM MAINTAINED" >> "$REPORT_FILE"
+        echo "Update Stream: ACTIVE" >> "$REPORT_FILE"
+        echo "Upstream Latest: $KERNEL_LATEST_VERSION (released: $KERNEL_LATEST_DATE)" >> "$REPORT_FILE"
+    elif [[ "$FETCH_FORMAT" == "json" ]]; then
+        # fastfetch.json present but kernel_latest empty → series EOL upstream
+        echo "Status: UPSTREAM EOL OR UNKNOWN" >> "$REPORT_FILE"
+        echo "Update Stream: NO ACTIVE UPSTREAM RELEASES FOUND" >> "$REPORT_FILE"
+        echo "Note: kernel.org shows no active releases for the $KERNEL_MAJOR.$KERNEL_MINOR series" >> "$REPORT_FILE"
+    else
+        # Legacy neofetch.json used → no live data
+        echo "Status: UNKNOWN - no kernel_latest data available" >> "$REPORT_FILE"
+        echo "Note: Run audit with fastfetch for live kernel comparison" >> "$REPORT_FILE"
+        echo "      Or check https://kernel.org for current status" >> "$REPORT_FILE"
+    fi
 
     echo "" >> "$REPORT_FILE"
-    echo "3. ADDITIONAL KERNEL INFORMATION" >> "$REPORT_FILE"
+    echo "2. KERNEL PATCH COMPARISON" >> "$REPORT_FILE"
     echo "---------------------------------------------------" >> "$REPORT_FILE"
-    echo "Current LTS Kernels (as of Feb 2026):" >> "$REPORT_FILE"
-    echo "  - 6.6 LTS (EOL: Dec 2026)" >> "$REPORT_FILE"
-    echo "  - 6.1 LTS (EOL: Dec 2026)" >> "$REPORT_FILE"
-    echo "  - 5.15 LTS (EOL: Oct 2026)" >> "$REPORT_FILE"
-    echo "  - 5.10 LTS (EOL: Dec 2026)" >> "$REPORT_FILE"
-    echo "" >> "$REPORT_FILE"
-    echo "Latest Stable Kernel: 6.12.x" >> "$REPORT_FILE"
-    echo "" >> "$REPORT_FILE"
-    echo "Note: Kernel support depends on distribution." >> "$REPORT_FILE"
-    echo "      Distribution kernels may have extended support." >> "$REPORT_FILE"
+
+    if [[ -n "$KERNEL_LATEST_VERSION" ]]; then
+        case "$OS_NAME" in
+            NixOS|Arch|"Arch Linux")
+                if [[ "$KERNEL_VERSION" == "$KERNEL_LATEST_VERSION" ]]; then
+                    echo "Patch Status: UP TO DATE" >> "$REPORT_FILE"
+                    echo "Running: $KERNEL_VERSION (matches upstream latest)" >> "$REPORT_FILE"
+                else
+                    echo "Patch Status: UPDATE AVAILABLE" >> "$REPORT_FILE"
+                    echo "Running:  $KERNEL_VERSION" >> "$REPORT_FILE"
+                    echo "Upstream: $KERNEL_LATEST_VERSION" >> "$REPORT_FILE"
+                    echo "Recommendation: Update kernel to $KERNEL_LATEST_VERSION" >> "$REPORT_FILE"
+                fi
+                ;;
+            Debian)
+                echo "Upstream Latest: $KERNEL_LATEST_VERSION" >> "$REPORT_FILE"
+                echo "Running: $KERNEL_VERSION" >> "$REPORT_FILE"
+                echo "Note: Debian maintains its own kernel patch numbering." >> "$REPORT_FILE"
+                echo "      Patch-level comparison with upstream is not meaningful." >> "$REPORT_FILE"
+                echo "      Ensure Debian security updates are current: apt upgrade" >> "$REPORT_FILE"
+                ;;
+            Ubuntu)
+                echo "Upstream Latest: $KERNEL_LATEST_VERSION" >> "$REPORT_FILE"
+                echo "Running: $KERNEL_VERSION" >> "$REPORT_FILE"
+                echo "Note: Ubuntu maintains its own kernel patch numbering." >> "$REPORT_FILE"
+                echo "      Patch-level comparison with upstream is not meaningful." >> "$REPORT_FILE"
+                echo "      Ensure Ubuntu security updates are current: apt upgrade" >> "$REPORT_FILE"
+                ;;
+            *)
+                echo "Upstream Latest: $KERNEL_LATEST_VERSION" >> "$REPORT_FILE"
+                echo "Running: $KERNEL_VERSION" >> "$REPORT_FILE"
+                echo "Note: Verify patch status via your distribution's security channels." >> "$REPORT_FILE"
+                ;;
+        esac
+    elif [[ "$FETCH_FORMAT" == "json" ]]; then
+        # Series EOL upstream
+        case "$OS_NAME" in
+            Ubuntu)
+                echo "Upstream series $KERNEL_MAJOR.$KERNEL_MINOR is EOL on kernel.org." >> "$REPORT_FILE"
+                echo "Note: Ubuntu may continue to support this kernel series via Ubuntu Pro/ESM." >> "$REPORT_FILE"
+                echo "      Verify via: ubuntu-security-status" >> "$REPORT_FILE"
+                ;;
+            *)
+                echo "Upstream series $KERNEL_MAJOR.$KERNEL_MINOR has no active releases on kernel.org." >> "$REPORT_FILE"
+                echo "Recommendation: Upgrade to an actively maintained kernel series." >> "$REPORT_FILE"
+                ;;
+        esac
+    else
+        echo "No live kernel data available." >> "$REPORT_FILE"
+        echo "Check https://kernel.org for current status." >> "$REPORT_FILE"
+    fi
+
+    if [[ "$KERNEL_MAJOR" -lt 5 ]]; then
+        echo "" >> "$REPORT_FILE"
+        echo "WARNING: Kernel version is very old (< 5.x)" >> "$REPORT_FILE"
+        echo "   This kernel is likely EOL and unsupported" >> "$REPORT_FILE"
+        echo "   CRITICAL: Upgrade immediately for security updates" >> "$REPORT_FILE"
+    fi
 fi
 
 echo "" >> "$REPORT_FILE"
@@ -696,14 +658,19 @@ fi
 # Check kernel status in Section 2 (look in the actual kernel section)
 KERNEL_SECTION=$(grep -A 50 "SECTION 2: KERNEL VERSION STATUS" "$REPORT_FILE" | head -50)
 
-if echo "$KERNEL_SECTION" | grep -q "Status: YES - STABLE KERNEL\|Status: YES - LTS"; then
-    KERNEL_STATUS="CURRENT"
-elif echo "$KERNEL_SECTION" | grep -q "Status: NEAR EOL\|Status: OLD STABLE\|Status: UNKNOWN"; then
+if echo "$KERNEL_SECTION" | grep -q "Status: YES - UPSTREAM MAINTAINED"; then
+    if echo "$KERNEL_SECTION" | grep -q "Patch Status: UP TO DATE"; then
+        KERNEL_STATUS="CURRENT"
+    elif echo "$KERNEL_SECTION" | grep -q "Patch Status: UPDATE AVAILABLE"; then
+        KERNEL_STATUS="WARNING"
+        KERNEL_RECOMMENDATION=$(echo "$KERNEL_SECTION" | grep "Recommendation:" | head -1 | sed 's/^Recommendation: //')
+    else
+        # Debian/Ubuntu or unknown distro with upstream-maintained series
+        KERNEL_STATUS="CURRENT"
+    fi
+elif echo "$KERNEL_SECTION" | grep -q "Status: UPSTREAM EOL OR UNKNOWN"; then
     KERNEL_STATUS="WARNING"
-    KERNEL_RECOMMENDATION=$(echo "$KERNEL_SECTION" | grep "Recommendation:" | head -1 | sed 's/^Recommendation: //')
-elif echo "$KERNEL_SECTION" | grep -q "Status: NO -"; then
-    KERNEL_STATUS="EOL"
-    KERNEL_RECOMMENDATION=$(echo "$KERNEL_SECTION" | grep "CRITICAL:" | sed 's/^.*CRITICAL: //')
+    KERNEL_RECOMMENDATION="Upgrade to an actively maintained kernel series"
 elif grep -q "ERROR: Unable to extract kernel version" "$REPORT_FILE"; then
     KERNEL_STATUS="UNKNOWN"
 fi

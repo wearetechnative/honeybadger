@@ -1,9 +1,4 @@
-# system-information-collection Specification
-
-## Purpose
-This specification defines how the Honeybadger audit system collects and stores system information using fastfetch. The system uses JSON format for structured data access, enabling reliable parsing with jq instead of brittle grep/sed text processing. Backward compatibility is maintained for existing audit archives that contain neofetch.json, neofetch.txt, or fastfetch.txt files.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: JSON-based System Information Storage
 The audit system SHALL generate system information in JSON format for structured data access using fastfetch with the honeybadger-shipped config.
@@ -52,3 +47,9 @@ The check-output command SHALL support reading legacy audit outputs containing `
 - **WHEN** both `fastfetch.json` and `neofetch.json` exist in an audit directory
 - **THEN** the system SHALL use `fastfetch.json` as the primary source
 - **AND** SHALL ignore legacy files
+
+## REMOVED Requirements
+
+### Requirement: neofetch as system information tool
+**Reason**: neofetch is unmaintained (archived on GitHub). Replaced by fastfetch which provides richer structured output and active maintenance.
+**Migration**: Replace `neofetch` installation with `fastfetch`. Existing `neofetch.json` files in archived outputs remain readable via the fallback chain.

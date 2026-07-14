@@ -98,7 +98,7 @@ audit(){
    checkdeps "python3"
  fi
  checkdeps "sed"
- checkdeps "neofetch" "https://github.com/dylanaraps/neofetch"
+ checkdeps "fastfetch"
  checkdeps "tar"
  checkdeps "jq"
  checkdeps "curl"
@@ -142,12 +142,15 @@ audit(){
      --input-path /var/log/lynis-report.dat \
      --output-path "$output/lynis-report.json" || { echo "ERROR: Report conversion failed"; exit 1; }
  fi
- # Run neofetch as actual user (not root) to capture correct username
- sudo -u "${SUDO_USER:-$(whoami)}" neofetch --off --stdout | jq -Rn '
+ # Run fastfetch as actual user (not root) to capture correct username
+ sudo -u "${SUDO_USER:-$(whoami)}" fastfetch \
+   --config "$thisdir/lib/fastfetch-config.jsonc" \
+   --logo none \
+   | jq -Rn '
    ([inputs | select(length>0)] |
     (.[0] | capture("^(?<user>[^@]+)@(?<hostname>\\S+)") // {}) +
     (.[1:] | map(select(contains(":"))) | map(capture("(?<key>[^:]+): (?<value>.*)")) | map({(.key|ascii_downcase|gsub(" "; "_")): .value}) | add // {})
-   )' > $output/neofetch.json
+   )' > "$output/fastfetch.json"
  command -v lsb_release >/dev/null && lsb_release -a > "$output/lsb_release.txt"
  show_version > $output/honeybadger-info.txt
  checkBlockDevices > $output/blockdevices.txt

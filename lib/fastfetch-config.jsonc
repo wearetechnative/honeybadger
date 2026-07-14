@@ -1,0 +1,112 @@
+{
+	"$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+	"logo": {
+		"type": "none"
+	},
+	"display": {
+		"separator": ": "
+	},
+	"modules": [
+		{
+			"type": "title",
+			"format": "{user-name}@{host-name}"
+		},
+		{
+			"type": "separator",
+			"string": "-"
+		},
+		{
+			"type": "command",
+			"key": "OS",
+			"text": ". /etc/os-release && echo \"$NAME ${BUILD_ID:-$VERSION_ID} ${VERSION_CODENAME:+($VERSION_CODENAME) }$(uname -m)\""
+		},
+		{
+			"type": "host",
+			"key": "Host"
+		},
+		{
+			"type": "command",
+			"key": "Hostname",
+			"text": "cat /etc/hostname"
+		},
+		{
+			"type": "kernel",
+			"key": "Kernel",
+			"format": "{release}"
+		},
+		{
+			"type": "command",
+			"key": "Kernel Built",
+			"text": "uname -v | awk '{print $6, $5, $9}' | xargs -I{} date -d '{}' '+%Y-%m-%d'"
+		},
+		{
+			"type": "command",
+			"key": "Kernel Latest",
+			"text": "branch=$(uname -r | cut -d. -f1-2); curl -s --max-time 3 https://www.kernel.org/releases.json | jq -r --arg b \"$branch.\" '[.releases[] | select(.version | startswith($b))] | .[0] | \"\\(.version) (\\(.released.isodate))\"'"
+		},
+		{
+			"type": "uptime",
+			"key": "Uptime"
+		},
+		{
+			"type": "packages",
+			"key": "Packages"
+		},
+		{
+			"type": "command",
+			"key": "Updates",
+			"text": "if command -v apt >/dev/null 2>&1; then n=$(apt list --upgradable 2>/dev/null | grep -c upgradable); echo \"$n available\"; elif command -v dnf >/dev/null 2>&1; then n=$(dnf check-update -q 2>/dev/null | grep -c .); echo \"$n available\"; elif command -v pacman >/dev/null 2>&1; then n=$(checkupdates 2>/dev/null | wc -l); echo \"$n available\"; elif command -v nix >/dev/null 2>&1; then echo \"run: nixos-rebuild switch --upgrade\"; else echo \"n/a\"; fi"
+		},
+		{
+			"type": "command",
+			"key": "Last Update",
+			"text": "if [ -f /var/log/apt/history.log ]; then grep 'Start-Date' /var/log/apt/history.log | tail -1 | cut -d' ' -f2-3; elif [ -f /var/log/dnf.log ]; then grep -iE 'upgrade|update' /var/log/dnf.log | tail -1 | awk '{print $1, $2}'; elif [ -d /nix/var/nix/profiles ]; then stat -c '%y' /nix/var/nix/profiles/system 2>/dev/null | cut -d'.' -f1; else echo 'n/a'; fi"
+		},
+		{
+			"type": "command",
+			"key": "Reboot",
+			"text": "if [ -f /var/run/reboot-required ]; then echo 'REQUIRED'; elif [ -f /run/reboot-required ]; then echo 'REQUIRED'; else echo 'not required'; fi"
+		},
+		{
+			"type": "shell",
+			"key": "Shell"
+		},
+		{
+			"type": "terminal",
+			"key": "Terminal"
+		},
+		{
+			"type": "cpu",
+			"key": "CPU",
+			"format": "{name} ({cores-logical}) @ {freq-max}"
+		},
+		{
+			"type": "gpu",
+			"key": "GPU"
+		},
+		{
+			"type": "memory",
+			"key": "Memory"
+		},
+		{
+			"type": "disk",
+			"key": "Disk (/)",
+			"folders": "/"
+		},
+		{
+			"type": "localip",
+			"key": "Local IP",
+			"showIpv4": true,
+			"showIpv6": false
+		},
+		{
+			"type": "loadavg",
+			"key": "Load"
+		},
+		{
+			"type": "datetime",
+			"key": "Date",
+			"format": "{year}-{month-pretty}-{day-pretty} {hour-pretty}:{minute-pretty}"
+		}
+	]
+}

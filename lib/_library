@@ -261,10 +261,13 @@ extract_os_info() {
         fi
     fi
 
-    # Fallback to neofetch.json, neofetch.txt, or fastfetch.txt
+    # Prefer fastfetch.json, fallback to neofetch.json, neofetch.txt, or fastfetch.txt
     local fetch_file=""
     local fetch_format=""
-    if [[ -f "$output_dir/neofetch.json" ]]; then
+    if [[ -f "$output_dir/fastfetch.json" ]]; then
+        fetch_file="$output_dir/fastfetch.json"
+        fetch_format="json"
+    elif [[ -f "$output_dir/neofetch.json" ]]; then
         fetch_file="$output_dir/neofetch.json"
         fetch_format="json"
     elif [[ -f "$output_dir/neofetch.txt" ]]; then
@@ -745,16 +748,23 @@ generate_asset_inventory() {
         serial="Not available"
     fi
 
-    # Get hardware info from neofetch.json or neofetch.txt
-    if [[ -f "$output_dir/neofetch.json" ]]; then
-        # Extract from JSON
-        owner=$(jq -r '.user // empty' "$output_dir/neofetch.json" 2>/dev/null)
-        model=$(jq -r '.host // empty' "$output_dir/neofetch.json" 2>/dev/null)
-        kernel=$(jq -r '.kernel // empty' "$output_dir/neofetch.json" 2>/dev/null)
+    # Get hardware info from fastfetch.json, neofetch.json or neofetch.txt
+    local _hw_json=""
+    if [[ -f "$output_dir/fastfetch.json" ]]; then
+        _hw_json="$output_dir/fastfetch.json"
+    elif [[ -f "$output_dir/neofetch.json" ]]; then
+        _hw_json="$output_dir/neofetch.json"
+    fi
 
-        # If hostname not found in lynis, get from neofetch JSON
+    if [[ -n "$_hw_json" ]]; then
+        # Extract from JSON
+        owner=$(jq -r '.user // empty' "$_hw_json" 2>/dev/null)
+        model=$(jq -r '.host // empty' "$_hw_json" 2>/dev/null)
+        kernel=$(jq -r '.kernel // empty' "$_hw_json" 2>/dev/null)
+
+        # If hostname not found in lynis, get from JSON
         if [[ "$hostname" == "Unknown" ]]; then
-            local json_hostname=$(jq -r '.hostname // empty' "$output_dir/neofetch.json" 2>/dev/null)
+            local json_hostname=$(jq -r '.hostname // empty' "$_hw_json" 2>/dev/null)
             [[ -n "$json_hostname" ]] && hostname="$json_hostname"
         fi
     elif [[ -f "$output_dir/neofetch.txt" ]]; then
@@ -792,9 +802,11 @@ generate_asset_inventory() {
     # Check for Nix installation
     if [[ "$os_full" =~ "NixOS" ]]; then
         nix_installed="Yes (NixOS)"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        # Check JSON for nix packages
-        local packages=$(jq -r '.packages // empty' "$output_dir/neofetch.json" 2>/dev/null)
+    elif [[ -f "$output_dir/fastfetch.json" ]] || [[ -f "$output_dir/neofetch.json" ]]; then
+        # Check JSON for nix packages (prefer fastfetch.json)
+        local _nix_json=""
+        [[ -f "$output_dir/fastfetch.json" ]] && _nix_json="$output_dir/fastfetch.json" || _nix_json="$output_dir/neofetch.json"
+        local packages=$(jq -r '.packages // empty' "$_nix_json" 2>/dev/null)
         if [[ -n "$packages" ]] && echo "$packages" | grep -q "nix-"; then
             nix_installed="Yes"
         fi
@@ -1207,8 +1219,15 @@ submit_all_reports() {
     local reports_submitted=()
     local reports_failed=()
 
-    # Submit neofetch report
-    if submit_report "$output_dir/neofetch.json" "neofetch"; then
+    # Submit system info report (fastfetch.json preferred, neofetch.json as fallback)
+    # Type stays "neofetch" — badgersbay server whitelist only accepts this type
+    local _sysinfo_file=""
+    if [[ -f "$output_dir/fastfetch.json" ]]; then
+        _sysinfo_file="$output_dir/fastfetch.json"
+    elif [[ -f "$output_dir/neofetch.json" ]]; then
+        _sysinfo_file="$output_dir/neofetch.json"
+    fi
+    if submit_report "$_sysinfo_file" "neofetch"; then
         ((success_count++))
         reports_submitted+=("neofetch")
     else
@@ -1424,9 +1443,11 @@ is_nixos() {
         fi
     fi
 
-    # Fallback: check neofetch.json
-    if [[ -f "$output_dir/neofetch.json" ]] && command -v jq >/dev/null 2>&1; then
-        local os=$(jq -r '.os // ""' "$output_dir/neofetch.json" 2>/dev/null)
+    # Fallback: check fastfetch.json or neofetch.json
+    local _os_json=""
+    [[ -f "$output_dir/fastfetch.json" ]] && _os_json="$output_dir/fastfetch.json" || _os_json="$output_dir/neofetch.json"
+    if [[ -f "$_os_json" ]] && command -v jq >/dev/null 2>&1; then
+        local os=$(jq -r '.os // ""' "$_os_json" 2>/dev/null)
         if [[ "$os" =~ "NixOS" ]]; then
             return 0
         fi
