@@ -230,7 +230,7 @@ get_kernel_info() {
     local cache_dir="${2:-$CACHE_DIR}"
 
     if [[ -f "$cache_dir/kernel-releases.json" ]] && command -v jq >/dev/null 2>&1; then
-        jq -r ".releases[] | select(.version | startswith(\"$kernel_version\")) | {version: .version, moniker: .moniker, iseol: .iseol}" "$cache_dir/kernel-releases.json" 2>/dev/null | head -1
+        jq -r ".releases[] | select(.version | startswith(\"${kernel_version}.\")) | {version: .version, moniker: .moniker, iseol: .iseol}" "$cache_dir/kernel-releases.json" 2>/dev/null | head -1
     fi
 }
 
@@ -403,12 +403,13 @@ check_os_status() {
     esac
 
     # Analyze kernel
+    local kernel_status_result="unknown"
     if [[ -n "$KERNEL_VERSION" ]]; then
-        analyze_kernel_status "$report_file" "$cache_dir"
+        kernel_status_result=$(analyze_kernel_status "$report_file" "$cache_dir")
     fi
 
     # Generate summary with status and recommendations
-    generate_status_summary "$report_file" "$os_status_result" "$cache_dir"
+    generate_status_summary "$report_file" "$os_status_result" "$kernel_status_result" "$cache_dir"
 
     # Print report
     cat "$report_file"
@@ -549,6 +550,11 @@ analyze_kali_status() {
 analyze_kernel_status() {
     local report_file="$1"
     local cache_dir="$2"
+    local result="unknown"
+
+    # Derive output directory from report file location (report is always $output_dir/os-kernel-status.txt)
+    local output_dir
+    output_dir=$(dirname "$report_file")
 
     echo "=====================================" >> "$report_file"
     echo "SECTION 2: KERNEL VERSION STATUS" >> "$report_file"
@@ -556,13 +562,160 @@ analyze_kernel_status() {
     echo "" >> "$report_file"
     echo "Detected Kernel: $KERNEL_VERSION" >> "$report_file"
     echo "" >> "$report_file"
+
+    if [[ -z "$KERNEL_VERSION" ]]; then
+        echo "Status: UNKNOWN - kernel version not detected" >> "$report_file"
+        echo "" >> "$report_file"
+        echo "$result"
+        return
+    fi
+
+    # Extract major.minor series — handles "6.18.37" and "6.8.0-60-generic"
+    local kernel_series
+    kernel_series=$(echo "$KERNEL_VERSION" | grep -oE '^[0-9]+\.[0-9]+')
+
+    if [[ -z "$kernel_series" ]]; then
+        echo "Status: UNKNOWN - unable to parse kernel series" >> "$report_file"
+        echo "" >> "$report_file"
+        echo "$result"
+        return
+    fi
+
+    echo "Kernel Series: ${kernel_series}.x" >> "$report_file"
+
+    # Primary data source: fastfetch.json kernel_latest field (populated during collection)
+    local kernel_latest_raw="" latest_version="" latest_date="" series_is_eol="false"
+    local fastfetch_file="$output_dir/fastfetch.json"
+
+    if [[ -f "$fastfetch_file" ]] && command -v jq >/dev/null 2>&1; then
+        kernel_latest_raw=$(jq -r '.kernel_latest // ""' "$fastfetch_file" 2>/dev/null)
+    fi
+
+    if [[ -n "$kernel_latest_raw" && "$kernel_latest_raw" != "null" && "$kernel_latest_raw" != "" ]]; then
+        # Format: "6.18.38 (2026-07-04)"
+        latest_version=$(echo "$kernel_latest_raw" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
+        latest_date=$(echo "$kernel_latest_raw" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')
+    else
+        # Fallback: kernel-releases.json cache
+        if [[ -f "$cache_dir/kernel-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+            latest_version=$(jq -r ".releases[] | select(.version | startswith(\"${kernel_series}.\")) | .version" \
+                "$cache_dir/kernel-releases.json" 2>/dev/null | head -1)
+            latest_date=$(jq -r ".releases[] | select(.version | startswith(\"${kernel_series}.\")) | .released.isodate" \
+                "$cache_dir/kernel-releases.json" 2>/dev/null | head -1)
+            series_is_eol=$(jq -r ".releases[] | select(.version | startswith(\"${kernel_series}.\")) | .iseol" \
+                "$cache_dir/kernel-releases.json" 2>/dev/null | head -1)
+            series_is_eol="${series_is_eol:-false}"
+        fi
+
+        # EOL check takes priority — iseol:true can coexist with a version entry
+        if [[ "$series_is_eol" == "true" ]]; then
+            echo "Type: EOL (upstream End-of-Life)" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "1. EOL STATUS" >> "$report_file"
+            echo "-------------" >> "$report_file"
+            echo "Status: ✗ END OF LIFE" >> "$report_file"
+            echo "  The ${kernel_series}.x series is no longer maintained upstream." >> "$report_file"
+            echo "  No further security patches will be released." >> "$report_file"
+            echo "" >> "$report_file"
+            echo "fail"
+            return
+        fi
+
+        if [[ -z "$latest_version" || "$latest_version" == "null" ]]; then
+            echo "Status: UNKNOWN - kernel series ${kernel_series}.x not found in available data" >> "$report_file"
+            echo "" >> "$report_file"
+            echo "$result"
+            return
+        fi
+    fi
+
+    # Determine kernel type from cache if available
+    local moniker=""
+    if [[ -f "$cache_dir/kernel-releases.json" ]] && command -v jq >/dev/null 2>&1; then
+        moniker=$(jq -r ".releases[] | select(.version | startswith(\"${kernel_series}.\")) | .moniker" \
+            "$cache_dir/kernel-releases.json" 2>/dev/null | head -1)
+    fi
+
+    local type_label
+    case "$moniker" in
+        mainline)   type_label="Mainline (short-lived, ~3 months support)" ;;
+        stable)     type_label="Stable" ;;
+        longterm)   type_label="Long-Term Support (LTS)" ;;
+        linux-next) type_label="linux-next (development only)" ;;
+        *)          type_label="${moniker:-Unknown}" ;;
+    esac
+
+    echo "Type: $type_label" >> "$report_file"
+    [[ -n "$latest_version" ]] && echo "Latest in series: $latest_version${latest_date:+ (released: $latest_date)}" >> "$report_file"
+    echo "" >> "$report_file"
+
+    # 1. EOL status
+    echo "1. EOL STATUS" >> "$report_file"
+    echo "-------------" >> "$report_file"
+    echo "Status: ✓ SUPPORTED - ${kernel_series}.x receives security patches" >> "$report_file"
+    echo "" >> "$report_file"
+    result="pass"
+
+    # 2. Patch currency — distro-aware
+    local running_upstream
+    running_upstream=$(echo "$KERNEL_VERSION" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
+
+    echo "2. PATCH CURRENCY" >> "$report_file"
+    echo "-----------------" >> "$report_file"
+
+    if [[ -z "$running_upstream" || -z "$latest_version" ]]; then
+        echo "Status: UNABLE TO DETERMINE" >> "$report_file"
+    elif [[ "$running_upstream" == "$latest_version" ]]; then
+        echo "Status: ✓ UP TO DATE - running latest patch ($latest_version)" >> "$report_file"
+    else
+        case "$OS_NAME" in
+            NixOS|Arch|"Arch Linux")
+                echo "Status: ⚠ PATCH AVAILABLE" >> "$report_file"
+                echo "  Running: $running_upstream" >> "$report_file"
+                echo "  Latest:  $latest_version${latest_date:+ (released: $latest_date)}" >> "$report_file"
+                result="warning"
+                ;;
+            Ubuntu)
+                echo "Status: ℹ INFO - upstream patch available (Ubuntu maintains own kernel numbering)" >> "$report_file"
+                echo "  Running: $running_upstream" >> "$report_file"
+                echo "  Upstream latest: $latest_version${latest_date:+ (released: $latest_date)}" >> "$report_file"
+                echo "  Ubuntu may continue to support this kernel; verify via Ubuntu security advisories." >> "$report_file"
+                ;;
+            Debian)
+                echo "Status: ℹ INFO - upstream patch available (Debian maintains own kernel patch numbering)" >> "$report_file"
+                echo "  Running: $running_upstream" >> "$report_file"
+                echo "  Upstream latest: $latest_version${latest_date:+ (released: $latest_date)}" >> "$report_file"
+                ;;
+            *)
+                echo "Status: ⚠ PATCH AVAILABLE" >> "$report_file"
+                echo "  Running: $running_upstream" >> "$report_file"
+                echo "  Latest:  $latest_version${latest_date:+ (released: $latest_date)}" >> "$report_file"
+                result="warning"
+                ;;
+        esac
+    fi
+    echo "" >> "$report_file"
+
+    echo "$result"
 }
 
 # Generate status summary (helper function)
+# Usage: generate_status_summary <report_file> <os_status> <kernel_status> <cache_dir>
 generate_status_summary() {
     local report_file="$1"
     local os_status="$2"
-    local cache_dir="$3"
+    local kernel_status="$3"
+    local cache_dir="$4"
+
+    # Worst-of logic: fail > warning > pass; unknown does not degrade os_status
+    local combined_status="$os_status"
+    if [[ "$os_status" == "fail" || "$kernel_status" == "fail" ]]; then
+        combined_status="fail"
+    elif [[ "$os_status" == "warning" || "$kernel_status" == "warning" ]]; then
+        combined_status="warning"
+    elif [[ "$os_status" == "pass" && "$kernel_status" == "pass" ]]; then
+        combined_status="pass"
+    fi
 
     echo "" >> "$report_file"
     echo "=====================================" >> "$report_file"
@@ -570,8 +723,7 @@ generate_status_summary() {
     echo "=====================================" >> "$report_file"
     echo "" >> "$report_file"
 
-    # Determine overall status
-    case "$os_status" in
+    case "$combined_status" in
         pass)
             echo "Result: ✓ PASS" >> "$report_file"
             echo "" >> "$report_file"
@@ -594,18 +746,25 @@ generate_status_summary() {
             echo "  - Continue applying security updates in the meantime" >> "$report_file"
             echo "  - Review the upgrade path and test in a staging environment" >> "$report_file"
 
-            # Add specific upgrade recommendation if available
-            local latest_release=""
-            case "$OS_NAME" in
-                NixOS)
-                    latest_release=$(get_latest_nixos_release "$cache_dir")
-                    [[ -n "$latest_release" ]] && echo "  - Target version: NixOS $latest_release" >> "$report_file"
-                    ;;
-                Ubuntu)
-                    latest_release=$(get_latest_ubuntu_lts "$cache_dir")
-                    [[ -n "$latest_release" ]] && echo "  - Target version: Ubuntu $latest_release LTS" >> "$report_file"
-                    ;;
-            esac
+            # OS-specific upgrade recommendation — only when OS itself is outdated
+            if [[ "$os_status" == "warning" ]]; then
+                local latest_release=""
+                case "$OS_NAME" in
+                    NixOS)
+                        latest_release=$(get_latest_nixos_release "$cache_dir")
+                        [[ -n "$latest_release" ]] && echo "  - Target OS version: NixOS $latest_release" >> "$report_file"
+                        ;;
+                    Ubuntu)
+                        latest_release=$(get_latest_ubuntu_lts "$cache_dir")
+                        [[ -n "$latest_release" ]] && echo "  - Target OS version: Ubuntu $latest_release LTS" >> "$report_file"
+                        ;;
+                esac
+            fi
+
+            # Kernel-specific recommendation when kernel triggered the warning
+            if [[ "$kernel_status" == "warning" ]]; then
+                echo "  - Apply kernel updates via regular system updates (e.g. nixos-rebuild switch --upgrade, apt upgrade)" >> "$report_file"
+            fi
             ;;
         fail)
             echo "Result: ✗ FAIL" >> "$report_file"
@@ -623,18 +782,24 @@ generate_status_summary() {
             echo "     - Increase monitoring and auditing" >> "$report_file"
             echo "  4. Document the security risk and create an upgrade timeline" >> "$report_file"
 
-            # Add specific upgrade recommendation if available
+            # OS-specific upgrade recommendation
             local latest_release=""
             case "$OS_NAME" in
                 NixOS)
                     latest_release=$(get_latest_nixos_release "$cache_dir")
-                    [[ -n "$latest_release" ]] && echo "  5. Upgrade to: NixOS $latest_release" >> "$report_file"
+                    [[ -n "$latest_release" ]] && echo "  5. Upgrade OS to: NixOS $latest_release" >> "$report_file"
                     ;;
                 Ubuntu)
                     latest_release=$(get_latest_ubuntu_lts "$cache_dir")
-                    [[ -n "$latest_release" ]] && echo "  5. Upgrade to: Ubuntu $latest_release LTS" >> "$report_file"
+                    [[ -n "$latest_release" ]] && echo "  5. Upgrade OS to: Ubuntu $latest_release LTS" >> "$report_file"
                     ;;
             esac
+
+            # Kernel-specific recommendation when kernel triggered the fail
+            if [[ "$kernel_status" == "fail" ]]; then
+                echo "  - KERNEL EOL: upgrade to a supported kernel series immediately" >> "$report_file"
+                echo "    Check https://www.kernel.org for supported series" >> "$report_file"
+            fi
 
             echo "" >> "$report_file"
             echo "ISO27001 Compliance Note:" >> "$report_file"
