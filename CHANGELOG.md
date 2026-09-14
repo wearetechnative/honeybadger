@@ -2,6 +2,15 @@
 
 ## NEXT VERSION
 
+### Fixed
+
+- **Lynis warnings split into bogus actions** - A single warning no longer shows up as four separate items in the actions report
+  - `warning[]` is written by Lynis as one pipe-separated record (`TEST-ID|description|details|solution`), but the converter had structured parsing only for `suggestion[]`
+  - The record fell through the generic pipe-split, so `warning[]` became a flat array of field values and the actions report used the array index as the test ID - rendering `### 0`, `### 1`, `### 2`, `### 3` and reporting 4 High findings where there was 1
+  - The converter now parses `warning[]` into `{id, description, details, solution}` objects, and the actions report reads the test ID and description from those fields
+  - Reports generated before this fix keep working: both legacy shapes (one raw string per warning, and a single warning split across the array) are normalised when the report is read
+  - Singular/plural corrected in the actions header ("1 actie" instead of "1 acties")
+
 ### Changed
 
 - **Slimmed Docker converter image** - Removed tooling the converter never invokes
