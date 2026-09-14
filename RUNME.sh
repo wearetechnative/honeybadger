@@ -807,6 +807,11 @@ check-output(){
  echo "Generating Lynis actions report..."
  generate_lynis_actions_report "$output_dir"
 
+ # Generate ISO27001 asset-register row report
+ echo ""
+ echo "Generating XLSX asset row report..."
+ generate_xlsx_asset_row_report "$output_dir"
+
  # Cleanup extracted directory if we created it
  if [[ "$cleanup_extracted" == true ]]; then
    echo ""
@@ -823,6 +828,7 @@ check-output(){
  echo "Generated files:"
  echo "  ✓ honeybadger-*-compliance.md (ISO27001 checklist)"
  echo "  ✓ honeybadger-*-actions.md (Lynis security actions)"
+ echo "  ✓ honeybadger-*-xlsx.md (velden voor de ISO27001 asset-register)"
  echo ""
 
  exit $exit_code
