@@ -105,6 +105,21 @@ The audit generates the following reports in `output-<hostname>-<user>-<date>/`:
 - `blockdevices.txt` - Disk encryption information
 - `installed-packages.txt` - Complete package listing
 
+### Compliance Reports
+
+Running `./RUNME.sh check-output <output-directory|tarball>` analyses a completed audit and
+writes three reports to the current directory:
+
+- `honeybadger-<user>-<date>-compliance.md` - ISO27001 compliance checklist with pass/fail status
+- `honeybadger-<user>-<date>-actions.md` - Critical and high severity Lynis findings to remediate
+- `honeybadger-<user>-<date>-xlsx.md` - Field values for the ISO27001 asset register
+  (`iso27001-compliance-essential.xlsx`, sheet `Active Assets`)
+
+The xlsx report lists, per spreadsheet column, the cell value to enter and the audit finding it
+was derived from. It also marks the columns you maintain yourself (asset ID, owner, proof file,
+remarks) and the two columns that contain formulas and must not be overwritten. Honeybadger never
+reads from or writes to the spreadsheet - updating the register stays a manual step.
+
 ## ISO27001 Compliance Requirements
 
 **Minimum Requirements:**

@@ -2,6 +2,21 @@
 
 ## NEXT VERSION
 
+### Added
+
+- **ISO27001 asset register report** - `check-output` now writes a third report,
+  `honeybadger-{user}-{date}-xlsx.md`, with the field values for the `Active Assets` sheet of
+  `iso27001-compliance-essential.xlsx`
+  - Lists nine columns the audit can determine (serial, model, OS, disk encryption, screen lock,
+    firewall, vulnerable packages, hardening score, OS up-to-date), each with the cell value to
+    enter and the finding it was derived from
+  - Identifies the register row by serial number, and marks the columns you maintain yourself
+    (asset ID, owner, proof file, remarks) plus the two formula columns that must not be overwritten
+  - Reports vulnerable packages as a finding rather than a cell value, because the spreadsheet's
+    data validation and its `Status` formula disagree about which value means compliant; a system
+    without a package audit tool is reported as undetermined instead of compliant
+  - The spreadsheet is never read or written; updating the register remains a manual step
+
 ### Fixed
 
 - **Lynis warnings split into bogus actions** - A single warning no longer shows up as four separate items in the actions report
