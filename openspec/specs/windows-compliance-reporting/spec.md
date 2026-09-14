@@ -1,4 +1,9 @@
-## ADDED Requirements
+# Windows Compliance Reporting
+
+## Purpose
+Generate ISO27001 compliance and action reports for Windows devices from collected security data.
+
+## Requirements
 
 ### Requirement: Generate ISO27001 compliance report
 The system SHALL generate a markdown compliance report (`honeybadger-{user}-{date}-compliance.md`) containing system information, compliance checklist with pass/fail status, and detailed configuration data for all security controls.

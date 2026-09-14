@@ -1,4 +1,9 @@
-## ADDED Requirements
+# Windows Security Data Collection
+
+## Purpose
+Collect system, hardware and security-control data on Windows devices for compliance reporting.
+
+## Requirements
 
 ### Requirement: Collect system information
 The system SHALL collect system information including hostname, username, OS version, and hardware model using neofetch or Windows built-in commands.
