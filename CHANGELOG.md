@@ -1,5 +1,31 @@
 # Changelog HoneyBadger
 
+## NEXT VERSION
+
+### Changed
+
+- **Slimmed Docker converter image** - Removed tooling the converter never invokes
+  - Dropped `wkhtmltopdf`, `texlive-latex-base`, `texlive-latex-recommended` and `pandoc`, plus the ten X11 and font libraries that existed solely to support wkhtmltopdf
+  - Dropped `cpanminus` and the `Excel::Writer::XLSX` CPAN build; the converter lazily loads format modules and the JSON path needs only `libjson-perl`
+  - Image size reduced from 806 MB to 169 MB (-79%), build time from minutes to roughly 25 seconds
+  - JSON output verified byte-identical to the previous image
+- **Pinned Docker build** - The image is now reproducible
+  - Base image pinned to `debian:bookworm-slim`; `debian:latest` had already drifted to Debian 13 (trixie) while the build assumed bookworm
+  - Converter pinned to commit `7a26d37cc3a0ca53ea259eee2b23f1e165ea4e6b` instead of downloading `master.zip` at build time
+- **Documented Docker as optional** - README now lists Docker as required only when `USE_DOCKER_CONVERTER=true`, and lists `python3` as a required dependency
+- **Corrected converter documentation** - `.honeybadger.conf.example` no longer claims the Docker converter provides HTML/PDF/Excel output; both converters emit JSON only
+- **neofetch references updated to fastfetch** - README and `openspec/project.md` brought in line with the July 2026 switch
+
+### Fixed
+
+- **Docker image rebuild detection** - Editing the `Dockerfile` never triggered a rebuild
+  - The guard compared the `Dockerfile` against the audit output directory, which is created moments before the test, so the condition could never be true
+  - Staleness is now decided by comparing the `Dockerfile`'s SHA-256 against a `hb.dockerfile.sha` label stamped into the image, so a `git clone` that only rewrites mtimes no longer forces a needless rebuild
+- **arm64 Docker builds** - The image hardcoded an amd64-only wkhtmltopdf `.deb`, and the failure was absorbed by a following `|| apt-get install -f`, so builds on Apple Silicon reported success while silently omitting the package
+  - All remaining packages are `Architecture: all` or have arm64 builds
+  - Verified by building for `linux/arm64` and confirming the resulting image produces byte-identical JSON to the amd64 build
+- **Spec files unreadable by OpenSpec tooling** - Four capability specs (`dependency-validation`, `hardeningkitty-integration`, `windows-compliance-reporting`, `windows-security-data-collection`) had been archived with their `## ADDED Requirements` delta headers intact and no `## Requirements` section, making every requirement in them invisible to `openspec validate`, `list` and `archive`
+
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 
 ### Added

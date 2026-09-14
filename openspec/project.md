@@ -38,7 +38,7 @@ thoroughly auditing device security configurations.
 - curl (HTTP requests for release data)
 
 ### Key Tools
-- **neofetch**: System information display
+- **fastfetch**: System information display
 - **lynis**: System security auditing
 - **lynis-report-converter**: Converts Lynis reports to JSON/Excel formats (fork: wearetechnative/lynis-report-converter)
 - **tar**: Report packaging and compression (gzip compression)
@@ -113,7 +113,7 @@ thoroughly auditing device security configurations.
 - `get_kernel_info()`: Query kernel.org releases
 
 #### Status Analysis
-- `extract_os_info()`: Extract OS data from multiple sources (lynis, neofetch, lsb_release)
+- `extract_os_info()`: Extract OS data from multiple sources (lynis, fastfetch, lsb_release)
 - `check_os_status()`: Main analysis function generating os-kernel-status.txt
 - `analyze_nixos_status()`: NixOS-specific analysis with PASS/WARNING/FAIL
 - `analyze_ubuntu_status()`: Ubuntu-specific analysis
@@ -147,7 +147,7 @@ thoroughly auditing device security configurations.
   - Retries on server errors (5xx) and network failures
   - Supports dry-run mode (logs without submitting)
 - `submit_all_reports()`: Submit all reports from output directory
-  - Submits neofetch.json, lynis-report.json
+  - Submits fastfetch.json, lynis-report.json
   - Tracks success/failure counts
   - Generates submission summary
   - Returns 0 if at least one report succeeded, 1 if all failed
@@ -292,7 +292,7 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
     - Generated automatically via Docker + wkhtmltopdf
     - Created during audit phase, not in check-output
     - File ownership may be root (from Docker), attempts automatic fix
-  - neofetch.json: System information (JSON format)
+  - fastfetch.json: System information (JSON format)
   - honeybadger-info.txt: Tool version info
   - blockdevices.txt: Storage configuration
   - screenlock-info.txt: Screen lock settings
@@ -303,10 +303,11 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
 - **audit**: Run full security audit and generate report (Usage: `sudo ./RUNME.sh audit`)
   - **Requires root privileges** - script will exit with error if not run with sudo
   - **Dependency checks at startup**:
-    - Required: lynis, docker, neofetch, jq, curl, tar, sed (exits if missing)
+    - Required: lynis, fastfetch, jq, curl, tar, sed (exits if missing)
+    - Converter-dependent: python3 by default, docker when USE_DOCKER_CONVERTER=true
   - Performs Lynis security audit
   - Converts Lynis report to JSON using Docker
-  - Collects system information (neofetch, packages, block devices, screen lock)
+  - Collects system information (fastfetch, packages, block devices, screen lock)
   - Generates OS/kernel status report with PASS/FAIL verdict
   - Generates asset inventory table
   - Generates filtered warnings/suggestions report (HTML/PDF via Docker)
@@ -359,7 +360,7 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
     - SERVER_TIMEOUT: Connection timeout in seconds (default: 30)
     - SERVER_RETRY_COUNT: Number of retry attempts (default: 3)
     - DRY_RUN: Test mode without actual HTTP requests (default: false)
-  - Submits JSON reports: neofetch.json, lynis-report.json
+  - Submits JSON reports: fastfetch.json, lynis-report.json
   - HTTP POST with headers: X-Hostname, X-Username, X-Report-Type
   - Retry logic with exponential backoff (1s, 2s, 4s)
   - Fails gracefully if server unavailable
@@ -372,7 +373,7 @@ The OS status checking system uses a 4-tier verdict system to assess compliance:
 ### Required Tools
 - **lynis**: https://github.com/CISOfy/lynis - Security auditing tool
 - **docker**: Container runtime for report conversion
-- **neofetch**: https://github.com/dylanaraps/neofetch - System info display
+- **fastfetch**: https://github.com/fastfetch-cli/fastfetch - System info display
 - **jq**: JSON processor for parsing and processing JSON reports
 - **curl**: HTTP client for fetching OS release information from APIs
 - **tar**: Archive creation

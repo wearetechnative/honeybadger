@@ -1,4 +1,9 @@
-## ADDED Requirements
+# HardeningKitty Integration
+
+## Purpose
+Parse HardeningKitty CSV output on Windows and turn its findings into compliance reporting and action-list input.
+
+## Requirements
 
 ### Requirement: Parse HardeningKitty CSV output
 The system SHALL parse the HardeningKitty CSV file (hardeningkitty.csv) to extract security findings for compliance reporting and action list generation.

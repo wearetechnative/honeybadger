@@ -1,6 +1,9 @@
 # Dependency Validation
 
-## ADDED Requirements
+## Purpose
+Validate that the tools the audit depends on are present before it starts: hard-fail on required tools, warn informatively on optional CVE scanners.
+
+## Requirements
 
 ### Requirement: Required Tool Dependency Checks
 The system SHALL check for required tools at audit startup and exit if they are missing.
@@ -36,8 +39,6 @@ The system SHALL check for required tools at audit startup and exit if they are 
   - Ubuntu/Debian: `sudo apt install curl`
   - Arch Linux: `sudo pacman -S curl`
   - macOS: curl is pre-installed
-
-## ADDED Requirements
 
 ### Requirement: OS-Specific CVE Scanner Dependency Check
 The system SHALL check for OS-appropriate CVE scanning tools at audit startup.

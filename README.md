@@ -10,11 +10,12 @@ Make your computer as tough as a honeybadger. And that is tough. Check this vide
 
 Install the required dependencies:
 
-- **Docker**: Container runtime (required)
 - **Lynis**: Security auditing tool (required)
-- **neofetch**: System information display (required)
+- **fastfetch**: System information display (required)
+- **python3**: Runs the Lynis report converter (required)
 - **jq**: JSON processor (required)
 - **curl**: HTTP client for API calls (required)
+- **Docker**: Container runtime (optional, only when `USE_DOCKER_CONVERTER=true`)
 - **dmidecode**: Hardware information tool (recommended for serial number collection)
 - **tar, sed**: Standard Unix utilities (usually pre-installed)
 
