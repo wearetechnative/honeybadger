@@ -2160,11 +2160,26 @@ generate_lynis_actions_report() {
     # Extract warnings and suggestions
     local temp_findings="/tmp/lynis-findings-$$.json"
 
+    # warning[] holds one object per warning ({id, description, ...}).
+    # Reports produced before that fix stored the raw pipe-separated form, either
+    # as one string per warning or - for a single warning - split across the array;
+    # both legacy shapes are normalised here so older tarballs keep working.
     jq -r '
-        ((.["warning[]"] // []) | to_entries | map({
-            test_id: (.key | tostring),
+        def warnings:
+            (.["warning[]"] // []) as $w
+            | if ($w | length) == 0 then []
+              elif (($w[0] | type) == "object") then
+                  $w | map({id: (.id // ""), description: (.description // "")})
+              elif ($w | map(select((type == "string") and test("\\|"))) | length) > 0 then
+                  $w | map(select((type == "string") and test("\\|")) | split("|"))
+                     | map({id: (.[0] // ""), description: (.[1] // "")})
+              else
+                  [{id: ($w[0] // ""), description: ($w[1] // "")}]
+              end;
+        (warnings | map({
+            test_id: (.id | if . == "" then "UNKNOWN" else . end),
             type: "warning",
-            description: .value
+            description: .description
         })) +
         ((.["suggestion[]"] // []) | to_entries | map({
             test_id: .value.id // (.key | tostring),
@@ -2194,6 +2209,10 @@ generate_lynis_actions_report() {
 
     # Only report CRITICAL and HIGH (exclude MEDIUM and LOW for focus)
     local total=$((${severity_counts[CRITICAL]} + ${severity_counts[HIGH]}))
+    local total_noun="acties"
+    if [[ $total -eq 1 ]]; then
+        total_noun="actie"
+    fi
 
     # Generate report
     cat > "$report_file" <<EOF
@@ -2201,7 +2220,7 @@ generate_lynis_actions_report() {
 
 **Scan datum:** $scan_date
 **Hostname:** $hostname
-**Totaal:** $total acties (${severity_counts[CRITICAL]} Critical, ${severity_counts[HIGH]} High)
+**Totaal:** $total $total_noun (${severity_counts[CRITICAL]} Critical, ${severity_counts[HIGH]} High)
 
 *Note: Medium en Low severity findings zijn niet opgenomen in dit rapport (focus op urgente items)*
 

@@ -53,6 +53,11 @@ INCONSISTENT_KEYS = [
     'selinux_mode',
 ]
 
+# Keys whose pipe-separated fields describe the fields of one record, not a
+# list of values. They must not be split by the generic pipe-split loop in
+# parse_dat_file(); transform_for_json() turns them into structured objects.
+STRUCTURED_PIPE_KEYS = {'warning[]'}
+
 DEDUP_KEYS = [
     'automation_tool_running[]',
     'boot_service[]',
@@ -165,7 +170,12 @@ def parse_dat_file(filepath):
 
     # Split pipe-delimited scalar values into arrays
     # (but skip tests_skipped and tests_executed first, and skip already-processed keys)
+    # warning[] is excluded: its pipe-separated fields describe a single warning
+    # (id|description|details|solution) and are turned into a structured object
+    # by transform_for_json() instead.
     for key in sorted(data.keys()):
+        if key in STRUCTURED_PIPE_KEYS:
+            continue
         if (not isinstance(data[key], list) and
             not isinstance(data[key], dict) and
             isinstance(data[key], str) and
@@ -181,6 +191,11 @@ def parse_dat_file(filepath):
     data.pop('tests_executed', None)
 
     return data
+
+
+def _blank_to_none(value):
+    """Lynis writes '-' for unset optional fields; normalise those to None."""
+    return None if value in ('', '-') else value
 
 
 def transform_for_json(data):
@@ -254,6 +269,29 @@ def transform_for_json(data):
                 new.append(p)
         data['plugin_enabled_phase1[]'] = new
 
+    # warning[]
+    # Raw form: "TEST-ID|description|details|solution|"
+    # A single warning arrives as a scalar string, multiple ones as a list.
+    if 'warning[]' in data:
+        raw = data['warning[]']
+        if not isinstance(raw, list):
+            raw = [raw]
+        new = []
+        for w in raw:
+            if isinstance(w, str):
+                if w in ('NA', '"NA"'):
+                    continue
+                parts = w.split('|')
+                new.append({
+                    'id': parts[0] if len(parts) > 0 else '',
+                    'description': parts[1] if len(parts) > 1 else '',
+                    'details': _blank_to_none(parts[2] if len(parts) > 2 else ''),
+                    'solution': _blank_to_none(parts[3] if len(parts) > 3 else ''),
+                })
+            else:
+                new.append(w)
+        data['warning[]'] = new
+
     # suggestion[]
     if isinstance(data.get('suggestion[]'), list):
         new = []
@@ -295,7 +333,7 @@ def apply_reference_ordering(data, reference_path):
     data = reorder_dict(data, ref_keys)
 
     # Per-item ordering for structured arrays
-    for key in ['details[]', 'suggestion[]', 'network_listen_port[]',
+    for key in ['details[]', 'warning[]', 'suggestion[]', 'network_listen_port[]',
                 'systemd_unit_file[]', 'installed_packages_array',
                 'plugin_enabled_phase1[]']:
         if (key in data and key in ref_data and
