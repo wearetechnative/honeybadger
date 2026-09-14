@@ -122,12 +122,23 @@ audit(){
    # Docker-based Perl converter (legacy)
    local image_name="wearetechnative/lynis-report-converter:latest"
 
+   # Stamp the Dockerfile's checksum into the image so staleness is decided by
+   # content, not by mtime (a fresh clone rewrites mtimes without changing anything).
+   local dockerfile_sha=""
+   if command -v sha256sum >/dev/null 2>&1; then
+     dockerfile_sha=$(sha256sum Dockerfile | cut -d' ' -f1)
+   elif command -v shasum >/dev/null 2>&1; then
+     dockerfile_sha=$(shasum -a 256 Dockerfile | cut -d' ' -f1)
+   fi
+   local image_sha
+   image_sha=$(docker image inspect --format '{{index .Config.Labels "hb.dockerfile.sha"}}' "$image_name" 2>/dev/null)
+
    if ! docker image inspect "$image_name" >/dev/null 2>&1; then
      echo "Building Docker image (first time)..."
-     docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
-   elif [ -f Dockerfile ] && [ Dockerfile -nt "$output" ]; then
+     docker build -t "$image_name" --label "hb.dockerfile.sha=$dockerfile_sha" . || { echo "ERROR: Docker build failed"; exit 1; }
+   elif [ -f Dockerfile ] && [ -n "$dockerfile_sha" ] && [ "$image_sha" != "$dockerfile_sha" ]; then
      echo "Dockerfile changed, rebuilding image..."
-     docker build -t "$image_name" . || { echo "ERROR: Docker build failed"; exit 1; }
+     docker build -t "$image_name" --label "hb.dockerfile.sha=$dockerfile_sha" . || { echo "ERROR: Docker build failed"; exit 1; }
    else
      echo "Using cached Docker image"
    fi

@@ -1,56 +1,29 @@
-FROM debian:latest
+# Pinned: debian:latest drifts across releases (it is trixie as of 2026-09),
+# while this image only needs a stable base for a single Perl script.
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# lynis-report-converter.pl lazily `require`s its format modules per output mode.
+# This image only ever runs the JSON path (see CMD), which needs JSON alone.
+# XML::Writer, Excel::Writer::XLSX and HTML::HTMLDoc are deliberately absent.
 RUN apt-get update && apt-get -y install --no-install-recommends \
-    wget \
-    unzip \
-    perl \
-    cpanminus \
     ca-certificates \
-    make \
-    jq \
-    pandoc \
-    texlive-latex-base \
-    texlive-latex-recommended \
-    # Dependencies for wkhtmltopdf
-    fontconfig \
-    libfreetype6 \
-    libjpeg62-turbo \
-    libpng16-16 \
-    libx11-6 \
-    libxcb1 \
-    libxext6 \
-    libxrender1 \
-    xfonts-75dpi \
-    xfonts-base \
-    # Perl dependencies from system packages (faster than CPAN)
-    libxml-writer-perl \
-    libarchive-zip-perl \
+    git \
     libjson-perl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install wkhtmltopdf from official releases
-RUN wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb -O /tmp/wkhtmltox.deb \
-    && dpkg -i /tmp/wkhtmltox.deb || apt-get install -f -y \
-    && rm -f /tmp/wkhtmltox.deb
-
-# Install only required Perl modules from CPAN (multi-stage for better caching)
-RUN cpanm --notest --quiet \
-    Excel::Writer::XLSX
-
-# Download and install lynis-report-converter
-RUN wget -q https://github.com/wearetechnative/lynis-report-converter/archive/refs/heads/master.zip -O /tmp/master.zip \
-    && unzip -q /tmp/master.zip -d /opt \
-    && cd /opt/lynis-report-converter-master/ \
-    && perl Makefile.PL \
-    && make \
-    && make install \
-    && cp lynis-report-converter.pl /usr/local/bin/ \
+# Pinned to a commit so the image contents do not depend on the build date.
+# Upstream: https://github.com/wearetechnative/lynis-report-converter
+ARG CONVERTER_COMMIT=7a26d37cc3a0ca53ea259eee2b23f1e165ea4e6b
+RUN git init -q /tmp/lrc \
+    && git -C /tmp/lrc remote add origin https://github.com/wearetechnative/lynis-report-converter.git \
+    && git -C /tmp/lrc fetch -q --depth 1 origin "${CONVERTER_COMMIT}" \
+    && git -C /tmp/lrc checkout -q FETCH_HEAD \
+    && cp /tmp/lrc/lynis-report-converter.pl /usr/local/bin/ \
     && chmod +x /usr/local/bin/lynis-report-converter.pl \
-    && rm -rf /tmp/* /root/.cpanm /opt/lynis-report-converter-master
+    && rm -rf /tmp/lrc
 
 # Set working directory
 WORKDIR /data

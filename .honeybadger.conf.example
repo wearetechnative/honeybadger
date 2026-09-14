@@ -23,8 +23,9 @@ SERVER_RETRY_COUNT=3
 DRY_RUN=false
 
 # Use Docker-based Perl converter instead of the default Python converter (default: false)
-# Set to true if you need the legacy Perl converter (supports HTML/PDF/Excel output)
-# When false, the Python script (lib/lynis_report_converter.py) is used (JSON only, no Docker required)
+# Both converters produce JSON only; the Docker image exists as an independent
+# second implementation to cross-check the Python converter's output.
+# When false, the Python script (lib/lynis_report_converter.py) is used (no Docker required)
 USE_DOCKER_CONVERTER=false
 
 # Note: Configuration files are checked in this order:
