@@ -40,7 +40,7 @@ report type into a silent or misleading result:
 - The system information report is submitted as type `fastfetch`, read from
   `fastfetch.json`
 - A missing system information file fails the submission instead of counting as
-  a success
+  a success, and `submit` exits non-zero when any report failed
 - Failed submissions print the server's response body alongside the status code
 - Both submission paths treat any 2xx as success and name a 207 as a partial
   submission
@@ -51,9 +51,27 @@ report type into a silent or misleading result:
 - `report-submission`: submitting audit reports to the collection server, for
   both the per-report and the tar archive path
 
+## Note on the existing report-submission delta
+
+`openspec/changes/add-server-report-submission` has never been archived, so
+`report-submission` does not exist under `openspec/specs/` and this change adds
+it. That older delta still describes the behaviour this change corrects: it
+names `neofetch` as the system information report type, treats a missing report
+file as "not an error", and exits 0 as long as one report succeeded. Whoever
+archives it must reconcile it with the requirements added here rather than
+restate them. Tracked as bean `honeybadger-9llx`.
+
+`.gitignore` is corrected in the same breath: the unanchored `report-**`
+pattern matches any directory named `report-submission`, so a spec delta for
+this capability could not be added without `-f` - and once archived, neither
+could `openspec/specs/report-submission/`. The pattern is now anchored to the
+repository root, the same fix the repository already applied to
+`/honeybadger-*.md`.
+
 ## Impact
 
 - `lib/_library`: `submit_report()`, `submit_tar_file()`, `submit_all_reports()`
+- `.gitignore`: `report-**` anchored to the repository root
 - Clients running against a badgersbay older than `use-fastfetch-system-info`
   would now be rejected for the system information report. No such server is
   deployed.

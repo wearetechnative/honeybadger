@@ -1483,16 +1483,71 @@ find_latest_tar() {
     return 0
 }
 
+# The reports the client submits, and the names both submission paths agree on.
+# The tar path does not send these names itself - the server derives the report
+# type from the file name inside the archive - so the file names here are the
+# same ones the audit writes into the tarball, and a change to one is a change
+# to both.
+HB_SYSINFO_REPORT_FILE="${HB_SYSINFO_REPORT_FILE:-fastfetch.json}"
+HB_SYSINFO_REPORT_TYPE="${HB_SYSINFO_REPORT_TYPE:-fastfetch}"
+HB_HARDENING_REPORT_FILE="${HB_HARDENING_REPORT_FILE:-lynis-report.json}"
+HB_HARDENING_REPORT_TYPE="${HB_HARDENING_REPORT_TYPE:-lynis}"
+
+# Classify a submission response so both submission paths decide the same way.
+# Usage: classify_submission_response <http_code> <curl_exit>
+# Echoes one of:
+#   success      - stored, nothing to report
+#   partial      - stored, but the server flagged something (207)
+#   client-error - the request was wrong; retrying cannot help
+#   retry        - transport failure or server-side error; worth another attempt
+classify_submission_response() {
+    local http_code="$1"
+    local curl_exit="$2"
+
+    if [[ "$curl_exit" -ne 0 ]]; then
+        echo "retry"
+        return 0
+    fi
+
+    case "$http_code" in
+        207)         echo "partial" ;;
+        2[0-9][0-9]) echo "success" ;;
+        4[0-9][0-9]) echo "client-error" ;;
+        *)           echo "retry" ;;
+    esac
+}
+
+# Print what the server said about a submission. The single-report endpoint
+# answers rejections with an http.server error page, so pull the one sentence
+# that carries the reason out of it rather than printing the whole page.
+# Usage: report_server_response <body_file>
+report_server_response() {
+    local body_file="$1"
+    local body message
+
+    [[ -s "$body_file" ]] || return 0
+
+    body=$(tr -d '\r' < "$body_file" | head -c 2000)
+
+    if [[ "$body" == *"<p>Message:"* ]]; then
+        message=$(printf '%s' "$body" | sed -n 's|.*<p>Message: \(.*\)</p>.*|\1|p' | head -1)
+        [[ -n "$message" ]] && body="$message"
+    fi
+
+    echo "  Server said: $body"
+}
+
 # Submit a single report to the server
 # Usage: submit_report <report_file> <report_type>
 submit_report() {
     local report_file="$1"
     local report_type="$2"
 
-    # Check if file exists
+    # A report that is not there was not submitted. Saying so is the point:
+    # counting it as a success hides an audit that never reached the server.
     if [[ ! -f "$report_file" ]]; then
-        echo "ℹ Skipping $report_type: file not found ($report_file)"
-        return 0
+        echo "✗ Cannot submit $report_type: file not found (${report_file:-<no file>})"
+        return 1
     fi
 
     # Auto-detect system identity
@@ -1517,12 +1572,17 @@ submit_report() {
         curl_cmd+=(-H "Authorization: Bearer $SERVER_TOKEN")
     fi
 
+    # The server explains a rejection in the response body, so keep it: an
+    # operator seeing only "HTTP 400" has to reproduce the call by hand.
+    local body_file
+    body_file=$(mktemp "${TMPDIR:-/tmp}/honeybadger-submit-XXXXXX")
+
     curl_cmd+=(
         --max-time "$SERVER_TIMEOUT"
         --silent
         --show-error
         --write-out "%{http_code}"
-        --output /dev/null
+        --output "$body_file"
         --data-binary "@$report_file"
     )
 
@@ -1533,12 +1593,15 @@ submit_report() {
         echo "  Server: $SERVER_URL"
         echo "  Headers: X-Hostname=$hostname, X-Username=$username, X-Report-Type=$report_type"
         echo "  Command: ${curl_cmd[*]}"
+        rm -f "$body_file"
         return 0
     fi
 
-    # Retry logic with exponential backoff
+    # Retry logic with exponential backoff. One exit path, so the captured
+    # response body is always cleaned up.
     local attempt=1
     local max_attempts=$SERVER_RETRY_COUNT
+    local status=1
 
     while [[ $attempt -le $max_attempts ]]; do
         echo "Submitting $report_type report (attempt $attempt/$max_attempts)..."
@@ -1547,16 +1610,29 @@ submit_report() {
         http_code=$("${curl_cmd[@]}" 2>&1)
         local curl_exit=$?
 
-        # Check HTTP response
-        if [[ $curl_exit -eq 0 && "$http_code" == "200" ]]; then
+        local outcome
+        outcome=$(classify_submission_response "$http_code" "$curl_exit")
+
+        if [[ "$outcome" == "success" ]]; then
             echo "✓ Successfully submitted $report_type report"
-            return 0
+            status=0
+            break
         fi
 
-        # Handle client errors (don't retry)
-        if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+        if [[ "$outcome" == "partial" ]]; then
+            # Stored, but the server flagged something about it. Retrying
+            # would submit the same report a second time.
+            echo "✓ Submitted $report_type report (HTTP $http_code, partial - the server stored it with a remark)"
+            report_server_response "$body_file"
+            status=0
+            break
+        fi
+
+        if [[ "$outcome" == "client-error" ]]; then
             echo "✗ Failed to submit $report_type: HTTP $http_code (client error, not retrying)"
-            return 1
+            report_server_response "$body_file"
+            status=1
+            break
         fi
 
         # Log failure and retry if attempts remaining
@@ -1566,13 +1642,15 @@ submit_report() {
             sleep "$delay"
         else
             echo "✗ Failed to submit $report_type after $max_attempts attempts (HTTP $http_code, curl exit $curl_exit)"
-            return 1
+            report_server_response "$body_file"
+            status=1
         fi
 
         ((attempt++))
     done
 
-    return 1
+    rm -f "$body_file"
+    return $status
 }
 
 # Submit tar file to server
@@ -1610,12 +1688,15 @@ submit_tar_file() {
         curl_cmd+=(-H "Authorization: Bearer $SERVER_TOKEN")
     fi
 
+    local body_file
+    body_file=$(mktemp "${TMPDIR:-/tmp}/honeybadger-submit-tar-XXXXXX")
+
     curl_cmd+=(
         --max-time "$SERVER_TIMEOUT"
         --silent
         --show-error
         --write-out "%{http_code}"
-        --output /dev/null
+        --output "$body_file"
         --data-binary "@$tar_file"
     )
 
@@ -1626,12 +1707,15 @@ submit_tar_file() {
         echo "  Endpoint: $endpoint"
         echo "  Headers: X-Hostname=$hostname, X-Username=$username"
         echo "  Command: ${curl_cmd[*]}"
+        rm -f "$body_file"
         return 0
     fi
 
-    # Retry logic with exponential backoff
+    # Retry logic with exponential backoff. One exit path, so the captured
+    # response body is always cleaned up.
     local attempt=1
     local max_attempts=$SERVER_RETRY_COUNT
+    local status=1
 
     while [[ $attempt -le $max_attempts ]]; do
         echo "Submitting tar file (attempt $attempt/$max_attempts)..."
@@ -1640,16 +1724,30 @@ submit_tar_file() {
         http_code=$("${curl_cmd[@]}" 2>&1)
         local curl_exit=$?
 
-        # Check HTTP response
-        if [[ $curl_exit -eq 0 && "$http_code" == "200" ]]; then
+        local outcome
+        outcome=$(classify_submission_response "$http_code" "$curl_exit")
+
+        if [[ "$outcome" == "success" ]]; then
             echo "✓ Successfully submitted tar file: $tar_file"
-            return 0
+            status=0
+            break
         fi
 
-        # Handle client errors (don't retry)
-        if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+        if [[ "$outcome" == "partial" ]]; then
+            # 207: the archive is stored. The server could not match it to an
+            # asset register entry, or did not recognise every member.
+            # Resending would only store it twice.
+            echo "✓ Submitted tar file: $tar_file (HTTP $http_code, partial - the server stored it with a remark)"
+            report_server_response "$body_file"
+            status=0
+            break
+        fi
+
+        if [[ "$outcome" == "client-error" ]]; then
             echo "✗ Failed to submit tar file: HTTP $http_code (client error, not retrying)" >&2
-            return 1
+            report_server_response "$body_file" >&2
+            status=1
+            break
         fi
 
         # Log failure and retry if attempts remaining
@@ -1659,13 +1757,15 @@ submit_tar_file() {
             sleep "$delay"
         else
             echo "✗ Failed to submit tar file after $max_attempts attempts (HTTP $http_code, curl exit $curl_exit)" >&2
-            return 1
+            report_server_response "$body_file" >&2
+            status=1
         fi
 
         ((attempt++))
     done
 
-    return 1
+    rm -f "$body_file"
+    return $status
 }
 
 # Submit all available reports from output directory
@@ -1714,30 +1814,25 @@ submit_all_reports() {
     local reports_submitted=()
     local reports_failed=()
 
-    # Submit system info report (fastfetch.json preferred, neofetch.json as fallback)
-    # Type stays "neofetch" — badgersbay server whitelist only accepts this type
-    local _sysinfo_file=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        _sysinfo_file="$output_dir/fastfetch.json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        _sysinfo_file="$output_dir/neofetch.json"
-    fi
-    if submit_report "$_sysinfo_file" "neofetch"; then
+    # Submit the system information report. The audit writes fastfetch.json and
+    # the server accepts the type "fastfetch"; the tar path arrives at the same
+    # type because the server reads it off that same file name in the archive.
+    if submit_report "$output_dir/$HB_SYSINFO_REPORT_FILE" "$HB_SYSINFO_REPORT_TYPE"; then
         ((success_count++))
-        reports_submitted+=("neofetch")
+        reports_submitted+=("$HB_SYSINFO_REPORT_TYPE")
     else
         ((fail_count++))
-        reports_failed+=("neofetch")
+        reports_failed+=("$HB_SYSINFO_REPORT_TYPE")
     fi
     echo ""
 
-    # Submit lynis report
-    if submit_report "$output_dir/lynis-report.json" "lynis"; then
+    # Submit the hardening report
+    if submit_report "$output_dir/$HB_HARDENING_REPORT_FILE" "$HB_HARDENING_REPORT_TYPE"; then
         ((success_count++))
-        reports_submitted+=("lynis")
+        reports_submitted+=("$HB_HARDENING_REPORT_TYPE")
     else
         ((fail_count++))
-        reports_failed+=("lynis")
+        reports_failed+=("$HB_HARDENING_REPORT_TYPE")
     fi
     echo ""
 
@@ -1757,12 +1852,12 @@ submit_all_reports() {
     echo ""
 
     # Exit with appropriate code
-    if [[ $success_count -gt 0 ]]; then
-        echo "At least one report submitted successfully"
-        return 0
-    else
-        echo "All submissions failed"
+    if [[ $fail_count -gt 0 ]]; then
+        echo "Not every report reached the server"
         return 1
+    else
+        echo "All reports submitted successfully"
+        return 0
     fi
 }
 

@@ -1,11 +1,11 @@
 ---
 # honeybadger-nxp0
 title: 'honeybadger: submit sends the system information report as neofetch, which badgersbay rejects'
-status: in-progress
+status: completed
 type: bug
 priority: high
 created_at: 2026-09-15T21:42:06Z
-updated_at: 2026-09-15T21:42:06Z
+updated_at: 2026-09-15T21:51:31Z
 ---
 
 ## Symptom
