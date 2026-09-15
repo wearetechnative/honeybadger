@@ -5,6 +5,7 @@ This guide covers testing for the new features added in v0.6.0.
 ## Prerequisites
 
 Before testing:
+- ✅ Unit tests pass: `./RUNME.sh run-tests`
 - ✅ Code changes implemented
 - ✅ Documentation updated (README, CHANGELOG)
 - ✅ Error handling verified
@@ -42,13 +43,14 @@ sudo ./RUNME.sh audit
 - [ ] System generation number displayed
 - [ ] Update history shows NixOS channel info
 
-### 8.4 Test on VM (Serial Number Fallback)
+### 8.4 Test on VM (no hardware serial)
 ```bash
 sudo ./RUNME.sh audit
 ```
 **Verify:**
 - [ ] Audit completes without errors
-- [ ] Serial number shows "Not available"
+- [ ] `hardware-serial.txt` contains `none-present`, not a fabricated value
+- [ ] The run reports it as "the hardware reports no serial", not as a failure
 - [ ] No error messages about missing dmidecode
 
 ### 8.5 Test with Low Hardening Score
@@ -63,6 +65,9 @@ sudo ./RUNME.sh audit
 - [ ] Status shows as "Fair" or "Poor"
 
 ### 8.6 Test without dmidecode
+This is the case that produced `Not available` for technative-casper and
+nixos-pankhurip: on NixOS `dmidecode` is not in PATH by default.
+
 ```bash
 # Temporarily rename dmidecode
 sudo mv /usr/bin/dmidecode /usr/bin/dmidecode.bak
@@ -74,7 +79,9 @@ sudo mv /usr/bin/dmidecode.bak /usr/bin/dmidecode
 ```
 **Verify:**
 - [ ] Audit completes successfully
-- [ ] Serial number field shows "Not available"
+- [ ] The real serial is still collected, from `/sys/class/dmi/id/product_serial`
+- [ ] `hardware-serial-source.txt` says `sysfs:product_serial`
+- [ ] No dependency check fails over the missing tool
 - [ ] No errors in output
 
 ### 8.7 Verify All New Output Files
@@ -83,7 +90,8 @@ After audit, check that these files exist and contain data:
 ls -lh output-*/
 ```
 **Expected files:**
-- [ ] `hardware-serial.txt` - Contains serial number or "Not available"
+- [ ] `hardware-serial.txt` - Contains the serial, or `could-not-read` / `none-present`
+- [ ] `hardware-serial-source.txt` - Names the source the serial came from
 - [ ] `os-update-history.txt` - Update status and last update date
 - [ ] `asset-inventory.txt` - Includes new fields (serial, score, NixOS if applicable)
 - [ ] `lynis-report-warnings_fails.html` - Severity-grouped findings
@@ -94,6 +102,7 @@ cat output-*/asset-inventory.txt
 ```
 **Check for these fields:**
 - [ ] Serial Number (separate from Model)
+- [ ] Serial Source
 - [ ] Model
 - [ ] Lynis Hardening Score (with status and compliance)
 - [ ] NixOS Commit Hash (NixOS only)
@@ -168,10 +177,16 @@ All tests pass when:
 
 ## Troubleshooting
 
-**If dmidecode fails:**
-- Normal on VMs - should show "Not available"
-- Check dmidecode is installed: `which dmidecode`
-- Try manually: `sudo dmidecode -s system-serial-number`
+**If the serial comes out as `could-not-read`:**
+- Check the kernel source directly: `sudo cat /sys/class/dmi/id/product_serial`
+- Check the board fallback: `sudo cat /sys/class/dmi/id/board_serial`
+- The audit must run as root; a non-root run cannot read either path
+- `dmidecode` is only a fallback and is not required
+
+**If the serial comes out as `none-present`:**
+- Normal on a virtual machine - the firmware genuinely has no serial
+- Confirm with `sudo cat /sys/class/dmi/id/product_serial`; an empty value or a
+  placeholder such as `Not Specified` is the hardware's own answer
 
 **If NixOS metadata missing:**
 - Check if really on NixOS: `cat /etc/os-release`

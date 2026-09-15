@@ -61,6 +61,10 @@ thoroughly auditing device security configurations.
   - **check-os-updates.sh**: OS update stream checker
   - **fetch-os-releases.sh**: Release information fetcher
   - **lynis-report-parser.sh**: Lynis report parser
+- **tests/**: Shell test suite (`./RUNME.sh run-tests`)
+  - **lib.sh**: assertions and stub helpers
+  - **test_*.sh**: one file per area
+  - **fixtures/**: captured tool output the parsers are tested against
 - **Dockerfile**: Container build configuration (includes wkhtmltopdf for PDF generation)
 - **.cache/**: Cached API responses (24-hour TTL)
   - nixos-releases.json
@@ -123,6 +127,24 @@ thoroughly auditing device security configurations.
 - `analyze_kernel_status()`: Kernel version analysis
 - `generate_status_summary()`: Creates final verdict with recommendations
 
+#### Hardware Serial Collection
+- `is_usable_serial()`: Decide whether a value is a usable serial (one token, no
+  whitespace, no firmware placeholder, not all zeroes) - the same rule the
+  collection server applies when matching a submission to an asset
+- `hb_collect_serial_linux()`: sysfs `product_serial` → sysfs `board_serial` →
+  `dmidecode` → `nix run nixpkgs#dmidecode` (NixOS only), stopping at the first
+  usable value
+- `hb_collect_serial_macos()`: `ioreg` → `system_profiler`
+- `hb_parse_ioreg_serial()` / `hb_parse_system_profiler_serial()`: stdin parsers,
+  kept separate so they can be tested against captured output
+- `hb_running_on_nixos()`: whether the running system is NixOS (`is_nixos()`
+  answers the same question about an output directory)
+- `collect_hardware_serial()`: platform dispatch; writes `hardware-serial.txt`
+  and `hardware-serial-source.txt`
+- `hb_serial_report_line()`: the end-of-run line for the operator
+- `read_recorded_serial()`: read the serial back out of an output directory for
+  the report generators
+
 #### Reporting
 - `generate_asset_inventory()`: Creates asset-inventory.txt with 13+ fields
 - `generate_warnings_report()`: Creates filtered HTML/PDF from Lynis warnings/suggestions
@@ -153,6 +175,12 @@ thoroughly auditing device security configurations.
   - Returns 0 if at least one report succeeded, 1 if all failed
 
 ### Testing Strategy
+- Shell test suite in `tests/`, run with `./RUNME.sh run-tests`
+  - `tests/lib.sh` holds the assertions and the PATH/stub helpers; each
+    `tests/test_*.sh` file runs in its own bash process
+  - Library functions take their external inputs through `HB_*` override
+    variables and through PATH, so a test can stub every source without touching
+    the machine it runs on
 - Dependency validation before execution (checkdeps function)
 - OS detection to ensure compatibility
 - Error handling for missing tools

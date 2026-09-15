@@ -1,0 +1,12 @@
+# Output format of `system_profiler SPHardwareDataType`.
+# Serial values are fictional; the surrounding structure - in particular the
+# properties that sit next to the serial - is what the parser has to handle.
+Hardware:
+
+    Hardware Overview:
+
+      Model Name: VMware Virtual Platform
+      Model Identifier: VMware20,1
+      Serial Number (system): Not available
+      Hardware UUID: 564D0000-0000-0000-0000-000000000000
+

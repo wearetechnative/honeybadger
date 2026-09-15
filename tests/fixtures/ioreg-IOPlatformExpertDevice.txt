@@ -1,0 +1,19 @@
+# Output format of `ioreg -d2 -c IOPlatformExpertDevice`.
+# Serial values are fictional; the surrounding structure - in particular the
+# properties that sit next to the serial - is what the parser has to handle.
++-o Root  <class IORegistryEntry, id 0x100000100, retain 15>
+  +-o MacBookPro15,4  <class IOPlatformExpertDevice, id 0x100000253, registered, matched, active, busy 0 (2 ms), retain 42>
+      {
+        "IOPolledInterface" = "AppleARMWatchdogTimerHibernateHandler is not serializable"
+        "IOPlatformSerialNumber" = "C02ZK1TSLVDQ"
+        "IOPlatformUUID" = "C1A0D8F2-1C3E-5B77-9E4A-6F0D2B8E31AA"
+        "platform-name" = <"t8103">
+        "model" = <"MacBookPro15,4">
+        "manufacturer" = <"Apple Inc.">
+        "target-type" = <"J293">
+        "IOBusyInterest" = "IOCommand is not serializable"
+        "compatible" = <"J293AP","MacBookPro15,4","AppleARM">
+        "IOPlatformSystemSleepPolicy" = <534c5030>
+        "serial-number" = <4330325a4b3154534c56445100000000>
+        "name" = <"device-tree">
+      }

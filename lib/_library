@@ -829,6 +829,328 @@ generate_status_summary() {
 }
 
 # ==============================================================================
+# HARDWARE SERIAL COLLECTION
+# ==============================================================================
+#
+# The hardware serial is the key the collection server matches a submission to
+# an asset on, so the audit reads it from the kernel first and only falls back
+# to external tools. Every platform runs the same usability check before a
+# value is written, because a value the server rejects helps nobody and a
+# fragment of unrelated output is worse than nothing: it looks like data.
+#
+# Results are returned through three globals, set by collect_hardware_serial():
+#
+#   HB_SERIAL_VALUE    the serial, empty unless HB_SERIAL_STATUS is "ok"
+#   HB_SERIAL_SOURCE   which source produced it, or which failed last
+#   HB_SERIAL_STATUS   ok | none-present | could-not-read
+
+# Values firmware reports in place of a real serial. Kept identical to the list
+# the collection server applies when matching, compared case-insensitively.
+HB_SERIAL_PLACEHOLDERS=(
+    "not available"
+    "not available (vm or unknown hardware)"
+    "to be filled by o.e.m."
+    "to be filled"
+    "default string"
+    "not specified"
+    "system serial number"
+    "none"
+    "unknown"
+)
+
+# The two tokens written when no usable serial could be determined.
+HB_SERIAL_NOT_READ="could-not-read"
+HB_SERIAL_NOT_PRESENT="none-present"
+
+# Decide whether a value is a usable hardware serial.
+# A usable serial is one token: non-empty, free of whitespace and control
+# characters, not a known placeholder and not all zeroes.
+# Usage: is_usable_serial <value>
+# Returns: 0 when usable, 1 otherwise
+is_usable_serial() {
+    local value="$1"
+
+    [[ -z "$value" ]] && return 1
+    # A serial is a single token. "Mac OS X<TAB>" fails here, as it should.
+    [[ "$value" =~ [[:space:]] ]] && return 1
+    [[ "$value" =~ [[:cntrl:]] ]] && return 1
+    # All zeroes, at any length, is a firmware default rather than a measurement
+    [[ "$value" =~ ^0+$ ]] && return 1
+    # So are the two tokens this tool itself writes when there is no serial
+    [[ "$value" == "$HB_SERIAL_NOT_READ" || "$value" == "$HB_SERIAL_NOT_PRESENT" ]] && return 1
+
+    local lower placeholder
+    lower=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+    for placeholder in "${HB_SERIAL_PLACEHOLDERS[@]}"; do
+        [[ "$lower" == "$placeholder" ]] && return 1
+    done
+
+    return 0
+}
+
+# Strip line endings from a raw source value. Any remaining whitespace is left
+# in place so is_usable_serial() can reject it.
+# Usage: _hb_serial_clean <value>
+_hb_serial_clean() {
+    printf '%s' "$1" | tr -d '\r\n'
+}
+
+# Extract IOPlatformSerialNumber from `ioreg -d2 -c IOPlatformExpertDevice`.
+# Reads the ioreg output on stdin so it can be tested against captured output.
+hb_parse_ioreg_serial() {
+    awk -F'"' '/IOPlatformSerialNumber/ { print $(NF-1); exit }'
+}
+
+# Extract the serial from `system_profiler SPHardwareDataType`.
+# Reads the system_profiler output on stdin. Restricting the caller to
+# SPHardwareDataType keeps this to the one "Serial Number" line that matters.
+hb_parse_system_profiler_serial() {
+    awk '/Serial Number/ { sub(/^[^:]*:[[:space:]]*/, ""); print; exit }'
+}
+
+# Determine whether this machine runs NixOS, for the nix fallback only.
+# is_nixos() answers the same question about an audit output directory; this
+# one asks about the running system.
+hb_running_on_nixos() {
+    local os_release="${HB_OS_RELEASE_FILE:-/etc/os-release}"
+
+    [[ -f "$os_release" ]] && grep -q '^ID=nixos' "$os_release" 2>/dev/null && return 0
+    command -v nixos-version >/dev/null 2>&1 && return 0
+    return 1
+}
+
+# Linux serial chain. Each source is tried only when the previous produced
+# nothing usable, so a machine with working sysfs never pays for the rest.
+#
+#   1. /sys/class/dmi/id/product_serial   root, no tool, no network
+#   2. /sys/class/dmi/id/board_serial     some vendors fill only this one
+#   3. dmidecode -s system-serial-number  when the tool happens to be present
+#   4. nix run nixpkgs#dmidecode          NixOS last resort, needs the network
+#
+# Sets HB_SERIAL_VALUE / HB_SERIAL_SOURCE / HB_SERIAL_STATUS.
+hb_collect_serial_linux() {
+    local product_serial="${HB_SYSFS_PRODUCT_SERIAL:-/sys/class/dmi/id/product_serial}"
+    local board_serial="${HB_SYSFS_BOARD_SERIAL:-/sys/class/dmi/id/board_serial}"
+    # Whether any source answered at all. A source that answered with an empty
+    # or placeholder value means the hardware has no serial; a source that
+    # could not be consulted at all means we failed to read one.
+    local responded=0
+    local raw=""
+
+    if [[ -r "$product_serial" ]]; then
+        responded=1
+        raw=$(_hb_serial_clean "$(cat "$product_serial" 2>/dev/null)")
+        if is_usable_serial "$raw"; then
+            HB_SERIAL_VALUE="$raw"
+            HB_SERIAL_SOURCE="sysfs:product_serial"
+            HB_SERIAL_STATUS="ok"
+            return 0
+        fi
+    fi
+
+    if [[ -r "$board_serial" ]]; then
+        responded=1
+        raw=$(_hb_serial_clean "$(cat "$board_serial" 2>/dev/null)")
+        if is_usable_serial "$raw"; then
+            HB_SERIAL_VALUE="$raw"
+            HB_SERIAL_SOURCE="sysfs:board_serial"
+            HB_SERIAL_STATUS="ok"
+            return 0
+        fi
+    fi
+
+    if command -v dmidecode >/dev/null 2>&1; then
+        if raw=$(dmidecode -s system-serial-number 2>/dev/null); then
+            responded=1
+            raw=$(_hb_serial_clean "$raw")
+            if is_usable_serial "$raw"; then
+                HB_SERIAL_VALUE="$raw"
+                HB_SERIAL_SOURCE="dmidecode"
+                HB_SERIAL_STATUS="ok"
+                return 0
+            fi
+        fi
+    fi
+
+    # Last resort, and only on NixOS: fetching dmidecode needs flakes enabled
+    # and the network on first use. With sysfs first it should never be reached.
+    if hb_running_on_nixos && command -v nix >/dev/null 2>&1; then
+        if raw=$(nix run nixpkgs#dmidecode \
+                     --extra-experimental-features "nix-command flakes" \
+                     -- -s system-serial-number 2>/dev/null); then
+            responded=1
+            raw=$(_hb_serial_clean "$raw")
+            if is_usable_serial "$raw"; then
+                HB_SERIAL_VALUE="$raw"
+                HB_SERIAL_SOURCE="nix:dmidecode"
+                HB_SERIAL_STATUS="ok"
+                return 0
+            fi
+        fi
+    fi
+
+    if [[ $responded -eq 1 ]]; then
+        HB_SERIAL_STATUS="$HB_SERIAL_NOT_PRESENT"
+        HB_SERIAL_SOURCE="hardware-reports-none"
+    else
+        HB_SERIAL_STATUS="$HB_SERIAL_NOT_READ"
+        HB_SERIAL_SOURCE="no-source-available"
+    fi
+    return 1
+}
+
+# macOS serial. The platform serial is a property, so read it as one rather
+# than parsing a human-readable report whose labels change between releases.
+# Sets HB_SERIAL_VALUE / HB_SERIAL_SOURCE / HB_SERIAL_STATUS.
+hb_collect_serial_macos() {
+    local responded=0
+    local raw=""
+
+    # Capture first and parse afterwards: piping straight into the parser would
+    # hand back the parser's exit status, and a tool that failed outright would
+    # then be counted as having answered.
+    local tool_output=""
+
+    if command -v ioreg >/dev/null 2>&1; then
+        if tool_output=$(ioreg -d2 -c IOPlatformExpertDevice 2>/dev/null); then
+            responded=1
+            raw=$(_hb_serial_clean "$(printf '%s\n' "$tool_output" | hb_parse_ioreg_serial)")
+            if is_usable_serial "$raw"; then
+                HB_SERIAL_VALUE="$raw"
+                HB_SERIAL_SOURCE="ioreg:IOPlatformSerialNumber"
+                HB_SERIAL_STATUS="ok"
+                return 0
+            fi
+        fi
+    fi
+
+    if command -v system_profiler >/dev/null 2>&1; then
+        if tool_output=$(system_profiler SPHardwareDataType 2>/dev/null); then
+            responded=1
+            raw=$(_hb_serial_clean "$(printf '%s\n' "$tool_output" | hb_parse_system_profiler_serial)")
+            if is_usable_serial "$raw"; then
+                HB_SERIAL_VALUE="$raw"
+                HB_SERIAL_SOURCE="system_profiler:SPHardwareDataType"
+                HB_SERIAL_STATUS="ok"
+                return 0
+            fi
+        fi
+    fi
+
+    if [[ $responded -eq 1 ]]; then
+        HB_SERIAL_STATUS="$HB_SERIAL_NOT_PRESENT"
+        HB_SERIAL_SOURCE="hardware-reports-none"
+    else
+        HB_SERIAL_STATUS="$HB_SERIAL_NOT_READ"
+        HB_SERIAL_SOURCE="no-source-available"
+    fi
+    return 1
+}
+
+# Collect the hardware serial and write it to the output directory.
+# Writes hardware-serial.txt (the serial, or one of the two not-found tokens)
+# and hardware-serial-source.txt (which source produced it).
+# Usage: collect_hardware_serial <output_dir>
+# Returns: 0 when a usable serial was written, 1 otherwise
+collect_hardware_serial() {
+    local output_dir="$1"
+
+    HB_SERIAL_VALUE=""
+    HB_SERIAL_SOURCE=""
+    HB_SERIAL_STATUS="$HB_SERIAL_NOT_READ"
+
+    local platform="${HB_SERIAL_PLATFORM:-}"
+    if [[ -z "$platform" ]]; then
+        case "$(uname -s 2>/dev/null)" in
+            Darwin) platform="macos" ;;
+            Linux)  platform="linux" ;;
+            *)      platform="unknown" ;;
+        esac
+    fi
+
+    case "$platform" in
+        linux) hb_collect_serial_linux ;;
+        macos) hb_collect_serial_macos ;;
+        *)
+            HB_SERIAL_STATUS="$HB_SERIAL_NOT_READ"
+            HB_SERIAL_SOURCE="unsupported-platform"
+            ;;
+    esac
+
+    if [[ -n "$output_dir" && -d "$output_dir" ]]; then
+        if [[ "$HB_SERIAL_STATUS" == "ok" ]]; then
+            printf '%s\n' "$HB_SERIAL_VALUE" > "$output_dir/hardware-serial.txt"
+        else
+            printf '%s\n' "$HB_SERIAL_STATUS" > "$output_dir/hardware-serial.txt"
+        fi
+        printf '%s\n' "${HB_SERIAL_SOURCE:-unknown}" > "$output_dir/hardware-serial-source.txt"
+    fi
+
+    [[ "$HB_SERIAL_STATUS" == "ok" ]]
+}
+
+# One line for the operator, naming which of the two outcomes applies.
+# Usage: hb_serial_report_line
+hb_serial_report_line() {
+    case "$HB_SERIAL_STATUS" in
+        ok)
+            echo "  ✅ Hardware serial: $HB_SERIAL_VALUE (source: $HB_SERIAL_SOURCE)"
+            ;;
+        "$HB_SERIAL_NOT_PRESENT")
+            echo "  ⚠️  Hardware serial: none-present - the hardware reports no serial."
+            echo "      Common on virtual machines. This asset needs a different key"
+            echo "      in the register rather than a repair."
+            ;;
+        *)
+            echo "  ❌ Hardware serial: could-not-read - no source returned a value."
+            echo "      Checked /sys/class/dmi/id/product_serial, board_serial,"
+            echo "      dmidecode and (on NixOS) nix run nixpkgs#dmidecode."
+            echo "      The submission will be stored but stays unmatched."
+            ;;
+    esac
+}
+
+# Read the serial recorded in an output directory, for the report generators.
+# Sets HB_SERIAL_VALUE / HB_SERIAL_SOURCE / HB_SERIAL_STATUS from the files.
+# Archives written before this chain existed hold values such as "Not available"
+# or a fragment of unrelated output; those become could-not-read, because at
+# this distance there is no telling which of the two outcomes applied.
+# Usage: read_recorded_serial <output_dir>
+# Returns: 0 when a usable serial was recorded, 1 otherwise
+read_recorded_serial() {
+    local output_dir="$1"
+    local raw=""
+
+    HB_SERIAL_VALUE=""
+    HB_SERIAL_SOURCE="unknown"
+    HB_SERIAL_STATUS="$HB_SERIAL_NOT_READ"
+
+    if [[ -f "$output_dir/hardware-serial-source.txt" ]]; then
+        raw=$(_hb_serial_clean "$(cat "$output_dir/hardware-serial-source.txt" 2>/dev/null)")
+        [[ -n "$raw" ]] && HB_SERIAL_SOURCE="$raw"
+    fi
+
+    if [[ ! -f "$output_dir/hardware-serial.txt" ]]; then
+        return 1
+    fi
+
+    raw=$(_hb_serial_clean "$(cat "$output_dir/hardware-serial.txt" 2>/dev/null)")
+
+    if is_usable_serial "$raw"; then
+        HB_SERIAL_VALUE="$raw"
+        HB_SERIAL_STATUS="ok"
+        return 0
+    fi
+
+    if [[ "$raw" == "$HB_SERIAL_NOT_PRESENT" ]]; then
+        HB_SERIAL_STATUS="$HB_SERIAL_NOT_PRESENT"
+    else
+        HB_SERIAL_STATUS="$HB_SERIAL_NOT_READ"
+    fi
+    return 1
+}
+
+# ==============================================================================
 # ASSET INVENTORY FUNCTIONS
 # ==============================================================================
 
@@ -904,13 +1226,16 @@ generate_asset_inventory() {
         fi
     fi
 
-    # Get serial number from dmidecode (requires root)
-    if [[ -f "$output_dir/hardware-serial.txt" ]]; then
-        serial=$(cat "$output_dir/hardware-serial.txt" 2>/dev/null | tr -d '\n')
-    fi
-    # Fallback if not available
-    if [[ -z "$serial" || "$serial" == "Not Specified" || "$serial" == "Default string" ]]; then
-        serial="Not available"
+    # Read the serial the audit recorded, along with the source it came from.
+    # read_recorded_serial() applies the same usability rule the collection
+    # server does, so an unusable value never reaches the table as though it
+    # were a measurement.
+    read_recorded_serial "$output_dir" || true
+    local serial_source="$HB_SERIAL_SOURCE"
+    if [[ "$HB_SERIAL_STATUS" == "ok" ]]; then
+        serial="$HB_SERIAL_VALUE"
+    else
+        serial="$HB_SERIAL_STATUS"
     fi
 
     # Get hardware info from fastfetch.json, neofetch.json or neofetch.txt
@@ -1038,6 +1363,7 @@ generate_asset_inventory() {
     printf "%s\n" "----------------------------------------" >> "$report_file"
     printf "%-35s | %s\n" "Hostname (Asset ID)" "$hostname" >> "$report_file"
     printf "%-35s | %s\n" "Serial Number" "$serial" >> "$report_file"
+    printf "%-35s | %s\n" "Serial Source" "$serial_source" >> "$report_file"
     printf "%-35s | %s\n" "Model" "$model" >> "$report_file"
     printf "%-35s | %s\n" "Description" "Personal Device" >> "$report_file"
     printf "%-35s | %s\n" "OS Edition + Version" "$os_full" >> "$report_file"
@@ -1073,7 +1399,11 @@ generate_asset_inventory() {
     echo "" >> "$report_file"
     echo "=====================================" >> "$report_file"
     echo "Notes:" >> "$report_file"
-    echo "  - Serial number may require manual verification" >> "$report_file"
+    echo "  - Serial Number 'could-not-read': no source returned a value - a" >> "$report_file"
+    echo "    machine or packaging problem worth chasing" >> "$report_file"
+    echo "  - Serial Number 'none-present': the hardware reports no serial, as a" >> "$report_file"
+    echo "    virtual machine legitimately does - this asset needs a different" >> "$report_file"
+    echo "    key in the register rather than a repair" >> "$report_file"
     echo "  - 'No suspicious software detected' requires manual review of:" >> "$report_file"
     echo "    * installed-packages.txt" >> "$report_file"
     echo "    * lynis-report.json security warnings" >> "$report_file"
@@ -2429,13 +2759,14 @@ generate_xlsx_asset_row_report() {
     local serial_known=false
 
     if [[ -f "$output_dir/hardware-serial.txt" ]]; then
-        local raw_serial=$(tr -d '\n\r' < "$output_dir/hardware-serial.txt" 2>/dev/null)
-        if [[ -n "$raw_serial" && "$raw_serial" != "Not Specified" && "$raw_serial" != "Default string" ]]; then
-            serial_cell="$raw_serial"
-            serial_src="$raw_serial"
+        if read_recorded_serial "$output_dir"; then
+            serial_cell="$HB_SERIAL_VALUE"
+            serial_src="$HB_SERIAL_VALUE (bron: $HB_SERIAL_SOURCE)"
             serial_known=true
+        elif [[ "$HB_SERIAL_STATUS" == "$HB_SERIAL_NOT_PRESENT" ]]; then
+            serial_src="none-present - de hardware meldt geen serienummer (gebruikelijk op een VM)"
         else
-            serial_src="serienummer niet leesbaar (dmidecode gaf geen waarde)"
+            serial_src="could-not-read - geen enkele bron gaf een waarde"
         fi
     else
         unavailable+=("hardware-serial.txt - serienummer")

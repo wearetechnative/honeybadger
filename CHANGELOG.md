@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Shell test suite** - `./RUNME.sh run-tests` runs the tests in `tests/`
+  - Covers serial validation against the real values found on compute2, the Linux chain with each
+    source stubbed in turn (asserting later steps are not reached when an earlier one succeeds),
+    the macOS parsers against captured `ioreg` and `system_profiler` output, and what is written
+    and reported when no usable serial exists
 - **ISO27001 asset register report** - `check-output` now writes a third report,
   `honeybadger-{user}-{date}-xlsx.md`, with the field values for the `Active Assets` sheet of
   `iso27001-compliance-essential.xlsx`
@@ -19,6 +24,24 @@
 
 ### Fixed
 
+- **Hardware serial never determined on half the fleet** - The audit now reads the serial from the
+  kernel instead of depending on `dmidecode` being installed
+  - `/sys/class/dmi/id/product_serial` is the primary source: root-only, but the audit already
+    requires root, and it needs no tool, no package and no network. It is a kernel interface, so
+    the same path works on NixOS, Ubuntu, Debian and Arch with no distribution-specific handling
+  - Falls back in order to `/sys/class/dmi/id/board_serial` (some vendors fill only that one),
+    `dmidecode -s system-serial-number` when the tool happens to be present, and on NixOS
+    `nix run nixpkgs#dmidecode` as a last resort. Each step runs only when the previous produced
+    nothing usable
+  - `dmidecode` is deliberately **not** added to the dependency check: aborting an audit over a
+    tool that most machines do not need would turn a soft problem into a hard failure
+  - Measured across the 22 archives on compute2-prod only five systems carried a usable serial;
+    `technative-casper` and `nixos-pankhurip` failed purely because `dmidecode` is not in PATH on
+    NixOS, while the kernel held the value all along
+- **macOS wrote a fragment of unrelated output as the serial** - `MBP-van-pim-pim` submitted
+  `Mac OS X<TAB>`, almost certainly from matching the wrong line of `system_profiler`
+  - The serial is now read as a property via `ioreg -d2 -c IOPlatformExpertDevice`, with
+    `system_profiler SPHardwareDataType` parsed on the `Serial Number` label as the fallback
 - **Lynis warnings split into bogus actions** - A single warning no longer shows up as four separate items in the actions report
   - `warning[]` is written by Lynis as one pipe-separated record (`TEST-ID|description|details|solution`), but the converter had structured parsing only for `suggestion[]`
   - The record fell through the generic pipe-split, so `warning[]` became a flat array of field values and the actions report used the array index as the test ID - rendering `### 0`, `### 1`, `### 2`, `### 3` and reporting 4 High findings where there was 1
@@ -28,6 +51,25 @@
 
 ### Changed
 
+- **A serial is validated before it is written** - An unusable value is no longer recorded as
+  though it were a measurement
+  - A usable serial is one token: non-empty, free of whitespace, not a known firmware placeholder
+    (`Not available`, `To Be Filled By O.E.M.`, `Default string`, `System Serial Number`, `None`,
+    `Unknown`, ...) and not all zeroes
+  - This is the same rule the collection server applies when matching a submission to an asset, so
+    the client and the server now agree on what counts. Writing a value the server rejects helps
+    nobody, and writing `Mac OS X` is worse than writing nothing: it looks like data
+- **The audit says why there is no serial** - `Not available` is gone, replaced by two tokens that
+  call for different responses
+  - `could-not-read`: no source returned a value - a machine or packaging problem worth chasing
+  - `none-present`: a source answered but the hardware has no serial, as a virtual machine
+    legitimately does - such an asset needs a different key in the register rather than a repair
+  - The outcome is reported at the end of the run where the operator sees it, instead of the client
+    silently writing `Not available` and nobody noticing until the dashboard showed the asset as
+    outstanding
+  - `asset-inventory.txt` gained a **Serial Source** row, and `hardware-serial-source.txt` records
+    which source produced the value. Archives written before this change are read back as
+    `could-not-read` rather than being mistaken for data
 - **Slimmed Docker converter image** - Removed tooling the converter never invokes
   - Dropped `wkhtmltopdf`, `texlive-latex-base`, `texlive-latex-recommended` and `pandoc`, plus the ten X11 and font libraries that existed solely to support wkhtmltopdf
   - Dropped `cpanminus` and the `Excel::Writer::XLSX` CPAN build; the converter lazily loads format modules and the JSON path needs only `libjson-perl`
