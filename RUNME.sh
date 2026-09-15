@@ -166,12 +166,14 @@ audit(){
  show_version > $output/honeybadger-info.txt
  checkBlockDevices > $output/blockdevices.txt
 
- # Collect hardware serial number (requires root)
+ # Collect hardware serial number (requires root, which audit already checked).
+ # The kernel is the primary source, so this does not depend on dmidecode being
+ # installed - which is exactly why half the fleet never reported a serial.
  echo "Collecting hardware serial number..."
- if command -v dmidecode >/dev/null 2>&1; then
-   dmidecode -s system-serial-number 2>/dev/null > "$output/hardware-serial.txt" || echo "Not available" > "$output/hardware-serial.txt"
+ if collect_hardware_serial "$output"; then
+   echo "  Found $HB_SERIAL_VALUE via $HB_SERIAL_SOURCE"
  else
-   echo "Not available" > "$output/hardware-serial.txt"
+   echo "  No usable serial yet ($HB_SERIAL_STATUS) - details at the end of the run"
  fi
 
  # Collect installed packages information
@@ -516,6 +518,14 @@ audit(){
    echo "  Skipping OS/kernel analysis (jq not available or lynis report missing)"
  fi
 
+ # Say plainly what the run determined about the serial. Without this the
+ # client used to write "Not available" and nobody noticed until the dashboard
+ # showed the asset as outstanding.
+ echo ""
+ echo "Hardware serial:"
+ hb_serial_report_line
+ echo ""
+
  tar czf $tarball $output
 
 # Fix ownership when running with sudo (tarball and output should belong to actual user, not root)
@@ -837,6 +847,13 @@ check-output(){
 make_command "fetch-releases" "Fetch latest OS release information"
 fetch-releases(){
  fetch_os_releases "${1:-.cache}"
+}
+
+make_command "run-tests" "Run the shell test suite"
+# Not named "test": that is a shell builtin, and shadowing it would change the
+# meaning of every `test` call in the libraries this script sources.
+run-tests(){
+ bash "$thisdir/tests/run-tests.sh" "$@"
 }
 
 ##### PLACE YOUR COMMANDS ABOVE #####

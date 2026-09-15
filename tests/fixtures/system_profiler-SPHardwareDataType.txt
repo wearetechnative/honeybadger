@@ -1,0 +1,19 @@
+# Output format of `system_profiler SPHardwareDataType`.
+# Serial values are fictional; the surrounding structure - in particular the
+# properties that sit next to the serial - is what the parser has to handle.
+Hardware:
+
+    Hardware Overview:
+
+      Model Name: MacBook Pro
+      Model Identifier: MacBookPro15,4
+      Chip: Apple M1
+      Total Number of Cores: 8 (4 performance and 4 efficiency)
+      Memory: 16 GB
+      System Firmware Version: 10151.140.19
+      OS Loader Version: 10151.140.19
+      Serial Number (system): C02ZK1TSLVDQ
+      Hardware UUID: C1A0D8F2-1C3E-5B77-9E4A-6F0D2B8E31AA
+      Provisioning UDID: 00008103-000E4D2E0288001E
+      Activation Lock Status: Enabled
+

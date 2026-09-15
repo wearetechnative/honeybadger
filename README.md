@@ -16,10 +16,13 @@ Install the required dependencies:
 - **jq**: JSON processor (required)
 - **curl**: HTTP client for API calls (required)
 - **Docker**: Container runtime (optional, only when `USE_DOCKER_CONVERTER=true`)
-- **dmidecode**: Hardware information tool (recommended for serial number collection)
+- **dmidecode**: Hardware information tool (optional, a fallback only - see below)
 - **tar, sed**: Standard Unix utilities (usually pre-installed)
 
-**Note:** `dmidecode` is recommended for hardware serial number collection but not required. On virtual machines or if dmidecode is unavailable, the serial number field will show "Not available".
+**Note:** `dmidecode` is not required and is deliberately not a dependency
+check. The serial is read from the kernel first, which works on every
+distribution without installing anything. See
+[Hardware serial number](#hardware-serial-number).
 
 #### Installing Lynis
 
@@ -69,11 +72,52 @@ sudo ./RUNME.sh audit
 Honeybadger performs a comprehensive security audit and collects the following information:
 
 ### Hardware & System Information
-- **Device Serial Number** - Collected via dmidecode for hardware asset tracking
+- **Device Serial Number** - Read from the kernel, with tool-based fallbacks (see [Hardware serial number](#hardware-serial-number))
 - **Hostname** - System identification
 - **Model/Description** - Hardware model information
 - **Operating System** - OS type, version, and kernel information
 - **NixOS Metadata** (NixOS only) - Nixpkgs commit hash, system generation, last rebuild date
+
+### Hardware serial number
+
+The hardware serial is the key the collection server matches a submission to an
+asset on, so the audit reads it from the kernel rather than depending on which
+packages a machine happens to carry. Each source is tried only when the previous
+one produced nothing usable.
+
+**Linux** (identical on NixOS, Ubuntu, Debian and Arch - these are kernel
+interfaces, not distribution features):
+
+| Order | Source                               | Notes                              |
+|-------|--------------------------------------|------------------------------------|
+| 1     | `/sys/class/dmi/id/product_serial`   | root only, no tool, no network     |
+| 2     | `/sys/class/dmi/id/board_serial`     | some vendors fill only this one    |
+| 3     | `dmidecode -s system-serial-number`  | only when the tool is present      |
+| 4     | `nix run nixpkgs#dmidecode`          | NixOS last resort, needs a network |
+
+**macOS:**
+
+| Order | Source                                | Notes                               |
+|-------|---------------------------------------|-------------------------------------|
+| 1     | `ioreg -d2 -c IOPlatformExpertDevice` | reads the serial as a property      |
+| 2     | `system_profiler SPHardwareDataType`  | parsed on the `Serial Number` label |
+
+A value is written only when it is usable: one token, no whitespace, not a
+known firmware placeholder (`Not available`, `To Be Filled By O.E.M.`,
+`Default string`, `System Serial Number`, `None`, `Unknown`, ...) and not all
+zeroes. This is the same rule the collection server applies when matching, so
+the client and the server agree on what counts as a serial.
+
+When no usable serial is found, `hardware-serial.txt` holds one of two tokens
+and the audit says which applies before it finishes:
+
+| Token            | Meaning                                                     |
+|------------------|-------------------------------------------------------------|
+| `could-not-read` | No source returned a value - a machine or packaging problem |
+| `none-present`   | A source answered, but the hardware has no serial - a VM    |
+
+The first is worth chasing. The second is a fact about the machine: such an
+asset needs a different key in the register rather than a repair.
 
 ### Security Controls
 - **Disk Encryption** - LUKS/dm-crypt detection
@@ -99,7 +143,8 @@ The audit generates the following reports in `output-<hostname>-<user>-<date>/`:
 - `lynis-report-warnings_fails.html` - HTML report with color-coded security findings
 - `os-kernel-status.txt` - Operating system EOL status and recommendations
 - `os-update-history.txt` - OS update history and last update date
-- `hardware-serial.txt` - Device serial number
+- `hardware-serial.txt` - Device serial number, or `could-not-read` / `none-present`
+- `hardware-serial-source.txt` - Which source the serial came from
 - `nixos-system-info.txt` - NixOS-specific metadata (NixOS only)
 - `screenlock-info.txt` - Screen lock configuration details
 - `blockdevices.txt` - Disk encryption information

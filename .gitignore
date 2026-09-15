@@ -11,5 +11,7 @@ os-kernel-status.txt
 .honeybadger.conf
 *.zip
 report-**
-honeybadger-*md
+# Audit output, generated in the repository root.
+# Anchored: an unanchored pattern also swallowed .beans/honeybadger-*.md
+/honeybadger-*.md
 iso27001-compliance-essential.xlsx

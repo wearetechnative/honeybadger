@@ -1,0 +1,11 @@
+# Output format of `ioreg -d2 -c IOPlatformExpertDevice`.
+# Serial values are fictional; the surrounding structure - in particular the
+# properties that sit next to the serial - is what the parser has to handle.
++-o Root  <class IORegistryEntry, id 0x100000100, retain 15>
+  +-o VMware20,1  <class IOPlatformExpertDevice, id 0x100000253, registered, matched, active, busy 0 (0 ms), retain 12>
+      {
+        "IOPlatformSerialNumber" = ""
+        "IOPlatformUUID" = "564D0000-0000-0000-0000-000000000000"
+        "model" = <"VMware20,1">
+        "manufacturer" = <"VMware, Inc.">
+      }
