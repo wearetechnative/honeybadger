@@ -1,3 +1,12 @@
+# hardware-serial-collection Capability
+
+## Purpose
+
+Determines the hardware serial the collection server matches a submission to an asset on. Names
+the source chain per platform, what counts as a usable value, and what the audit writes and
+reports when there is none - so a machine without the right package installed still yields a
+serial, and a value that is not one is never recorded as though it were.
+
 ## ADDED Requirements
 
 ### Requirement: Determine the hardware serial without requiring a tool
