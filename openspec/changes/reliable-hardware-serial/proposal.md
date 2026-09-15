@@ -69,6 +69,6 @@ outstanding for the round. Roughly half the fleet is in that state.
 ## Non-goals
 
 - Windows. `AUDIT.ps1` already reads `Win32_BIOS.SerialNumber` correctly; it
-  only fails to write the value to a file, which is bean wtoorren-cikq.
+  only fails to write the value to a file, which is bean honeybadger-k80g.
 - Changing what the collection server does with a missing serial. It already
   stores the submission and reports `no_serial`.

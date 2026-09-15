@@ -19,7 +19,7 @@ longer produces.
 - Remove the legacy-format branches and the notes that explain them
 
 Windows is out of scope here: `AUDIT.ps1` still runs neofetch and writes ASCII
-art, which is a larger piece of work tracked in bean `wtoorren-cikq`.
+art, which is a larger piece of work tracked in bean `honeybadger-k80g`.
 
 ## Capabilities
 

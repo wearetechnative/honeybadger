@@ -36,7 +36,7 @@ change to a human-facing table.
 - One additional file per audit. No change to what is collected or how anything
   is determined.
 - The Windows client does not produce an asset inventory at all and cannot
-  satisfy this yet; see bean `wtoorren-cikq`, which should target this schema
+  satisfy this yet; see bean `honeybadger-k80g`, which should target this schema
   rather than inventing a second one.
 - Consumer side: badgersbay change `asset-register-identity` establishes serial
   identity and the asset register; extraction of these values is the follow-on
