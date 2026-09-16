@@ -11,7 +11,7 @@ Make your computer as tough as a honeybadger. And that is tough. Check this vide
 Install the required dependencies:
 
 - **Lynis**: Security auditing tool (required)
-- **fastfetch**: System information display (required)
+- **fastfetch**: System information display (required, and not in every archive - see [Installing fastfetch](#installing-fastfetch))
 - **python3**: Runs the Lynis report converter (required)
 - **jq**: JSON processor (required)
 - **curl**: HTTP client for API calls (required)
@@ -60,6 +60,80 @@ sudo ./lynis audit system
 ```
 
 To ensure you have the latest version, check https://github.com/CISOfy/lynis for updates.
+
+#### Installing fastfetch
+
+Unlike Lynis, fastfetch is not in every archive. Check the table before
+reaching for your package manager - on Ubuntu 24.04 LTS `apt install fastfetch`
+fails because the package is simply not there, not because you mistyped it.
+
+| Distribution        | fastfetch                                    |
+|---------------------|----------------------------------------------|
+| Arch Linux          | `extra`                                      |
+| Debian 13 (trixie)  | in the archive                               |
+| Ubuntu 24.04 LTS    | **absent** - use the upstream `.deb` below   |
+| Ubuntu 25.04+       | in the archive                               |
+| Fedora              | in the archive                               |
+| macOS               | Homebrew                                     |
+
+**Arch Linux:**
+```bash
+sudo pacman -S fastfetch
+```
+
+**Debian 13+ / Ubuntu 25.04+:**
+```bash
+sudo apt install fastfetch
+```
+
+**Ubuntu 24.04 LTS and older:**
+```bash
+# Not in the archive. Take the release build from upstream.
+curl -LO https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb
+sudo dpkg -i fastfetch-linux-amd64.deb
+```
+Use `fastfetch-linux-aarch64.deb` on ARM. The `-polyfilled` variants of both
+exist for older glibc; try the plain one first.
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install fastfetch
+```
+An upstream `fastfetch-linux-amd64.rpm` is published alongside the `.deb` if
+your release does not carry the package.
+
+**macOS (via Homebrew):**
+```bash
+brew install fastfetch
+```
+
+#### Installing the remaining dependencies
+
+`jq`, `curl` and `python3` are in every distribution's archive under those
+names, with one exception worth knowing:
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install jq curl python3
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install jq curl python3
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S jq curl python
+```
+On Arch the package is `python`, not `python3` - `pacman -S python3` fails
+outright. It still provides `/usr/bin/python3`, which is the command the audit
+looks for.
+
+**macOS (via Homebrew):**
+```bash
+brew install jq curl python3
+```
 
 ## Usage on Linux and macOS
 

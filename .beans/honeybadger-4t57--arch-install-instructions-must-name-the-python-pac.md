@@ -1,14 +1,14 @@
 ---
 # honeybadger-4t57
 title: Per-distribution install instructions for the required dependencies
-status: todo
+status: completed
 type: task
 priority: low
 tags:
     - docs
     - arch
 created_at: 2026-09-16T11:28:24Z
-updated_at: 2026-09-16T12:18:32Z
+updated_at: 2026-09-16T12:23:10Z
 ---
 
 `README.md` lists five required dependencies and then tells you how to install
@@ -72,3 +72,34 @@ Low, and it should stay low. Nothing is broken; this is a hole in the
 documentation that costs whoever next onboards a non-Arch Linux host an
 afternoon. Fold it in the next time `README.md` is open for another reason
 rather than scheduling it on its own.
+
+
+## Done
+
+`README.md` now carries `#### Installing fastfetch` and `#### Installing the
+remaining dependencies` beside the existing Lynis section, and the dependency
+list points at the first of them.
+
+Every claim was verified against the distributions' own package APIs on
+2026-09-16 rather than taken from the acceptance log:
+
+| Source                | fastfetch                                        |
+|-----------------------|--------------------------------------------------|
+| Arch `extra`          | 2.68.1                                           |
+| Debian trixie         | 2.40.4  (sid/forky 2.67.1)                       |
+| Ubuntu noble 24.04    | **not published** - confirmed absent on Launchpad|
+| Ubuntu plucky 25.04   | 2.38.0, and every release after it               |
+| Fedora 43             | 2.68.1                                           |
+| Homebrew              | 2.68.1                                           |
+
+So the acceptance run's finding holds exactly: fastfetch entered Ubuntu at
+25.04, and 24.04 LTS - the release most fleet hosts are on - has to take the
+upstream `.deb`. That is now the documented route, with `-amd64`, `-aarch64`
+and the `.rpm` all checked to resolve 200 through
+`releases/latest/download/`.
+
+The python note landed where it belongs: one line under the Arch block saying
+the package is `python`, that `pacman -S python3` fails, and that it still
+provides the `/usr/bin/python3` the audit looks for.
+
+No code changed and no OpenSpec change was needed - `README.md` only.
