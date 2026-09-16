@@ -2,6 +2,22 @@
 
 ## NEXT VERSION
 
+### Changed
+
+- **`submit` now submits the audit archive** - BEHAVIOUR CHANGE. It previously
+  submitted reports one at a time to `SERVER_URL/`, an endpoint with no concept
+  of a hardware serial, so those submissions could not be attributed to an asset
+  in the ISO register. They landed under hostname and username with no evidence
+  archive beside them. `submit` now sends the archive to `SERVER_URL/submit-tar`,
+  which carries the serial and lets the server resolve the asset.
+  - `submit-tar` keeps working as a deprecated alias and warns, so scheduled
+    jobs calling it do not fail silently
+
+### Removed
+
+- **Per-report submission** - `submit_all_reports()` and `submit_report()` are
+  gone along with the command that used them
+
 ### Added
 
 - **Shell test suite** - `./RUNME.sh run-tests` runs the tests in `tests/`
