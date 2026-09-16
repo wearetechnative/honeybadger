@@ -163,6 +163,26 @@
   - All remaining packages are `Architecture: all` or have arm64 builds
   - Verified by building for `linux/arm64` and confirming the resulting image produces byte-identical JSON to the amd64 build
 - **Spec files unreadable by OpenSpec tooling** - Four capability specs (`dependency-validation`, `hardeningkitty-integration`, `windows-compliance-reporting`, `windows-security-data-collection`) had been archived with their `## ADDED Requirements` delta headers intact and no `## Requirements` section, making every requirement in them invisible to `openspec validate`, `list` and `archive`
+- **Hostname resolution without `hostname(1)`** - The audit named its output
+  directory and tar archive with `local hostname=$(hostname -s)`. `hostname(1)`
+  ships in `inetutils` and is not part of Arch's base install, so on a stock
+  Arch host the command was not found
+  - The failure was silent: `local` is a builtin that always returns 0, so the
+    assignment's exit status was the declaration's rather than the command's.
+    `set -e` never fired, nothing was printed, and the run wrote
+    `output--<user>-<date>` and `honeybadger--<user>-<date>.tar.gz` with an
+    empty hostname in the name
+  - The hostname is now resolved from `uname -n`, then `$HOSTNAME`, then
+    `/etc/hostname` - none of which needs a package on any supported platform.
+    The domain is cut off in the shell with `${name%%.*}` instead of by
+    `hostname -s`
+  - A value that cannot name a file (empty, whitespace, control characters, a
+    `/`) falls through to the next source, and when no source answers the audit
+    stops with an error naming all three rather than producing output without a
+    hostname
+  - `unpack_tarball` had the same masking on its `tar` listing; declaration and
+    assignment are now separate there too, and a test fails the suite if any
+    `local x=$(cmd)` is reintroduced into `RUNME.sh`
 
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 

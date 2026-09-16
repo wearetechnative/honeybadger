@@ -829,6 +829,88 @@ generate_status_summary() {
 }
 
 # ==============================================================================
+# HOSTNAME RESOLUTION
+# ==============================================================================
+#
+# The hostname names the output directory and the tar archive, so the fleet can
+# tell one submission from another. It is resolved from sources that exist
+# everywhere rather than from hostname(1), which is not part of Arch's base
+# install - a host without inetutils used to produce output--<user>-<date> and
+# say nothing about it.
+#
+# Order, each consulted only when the previous produced nothing usable:
+#
+#   1. uname -n         coreutils; asks the kernel, so it cannot be stale
+#   2. $HOSTNAME        set by bash itself; needs no executable at all
+#   3. /etc/hostname    configuration rather than state, hence last
+
+# Whether a candidate can serve as a path component and part of a filename.
+# This is not a DNS check: "localhost" is a poor name for a fleet asset but it
+# is what the machine is called, and substituting something else invents data.
+# Usage: hb_usable_hostname <value>
+# Returns: 0 when usable, 1 otherwise
+hb_usable_hostname() {
+    local value="$1"
+
+    [[ -z "$value" ]] && return 1
+    # uname -n on a misconfigured host has been seen to return a bare newline
+    [[ "$value" =~ [[:space:]] ]] && return 1
+    [[ "$value" =~ [[:cntrl:]] ]] && return 1
+    # A slash would silently move where the output directory is created
+    [[ "$value" == */* ]] && return 1
+
+    return 0
+}
+
+# Cut a fully qualified name down to its first label, as `hostname -s` did.
+# A name without a dot comes back unchanged.
+_hb_shorten_hostname() {
+    printf '%s' "${1%%.*}"
+}
+
+# Print the machine's short hostname on stdout.
+# Returns 1 and prints nothing when no source yields a usable name; the caller
+# decides what that means. Declaration and assignment are kept apart on purpose:
+# `local x=$(cmd)` returns the builtin's status, not the command's, which is how
+# the missing hostname(1) stayed invisible in the first place.
+hb_resolve_short_hostname() {
+    local hostname_file="${HB_HOSTNAME_FILE:-/etc/hostname}"
+    local candidate=""
+
+    if command -v uname >/dev/null 2>&1; then
+        if candidate=$(uname -n 2>/dev/null); then
+            candidate=$(_hb_shorten_hostname "$candidate")
+            if hb_usable_hostname "$candidate"; then
+                printf '%s' "$candidate"
+                return 0
+            fi
+        fi
+    fi
+
+    candidate=$(_hb_shorten_hostname "${HOSTNAME:-}")
+    if hb_usable_hostname "$candidate"; then
+        printf '%s' "$candidate"
+        return 0
+    fi
+
+    if [[ -r "$hostname_file" ]]; then
+        # The `read` builtin takes the first line without spawning anything, so
+        # this source works even where coreutils is unavailable. Its status is
+        # ignored deliberately: a file with no trailing newline makes it return
+        # 1 while still having read the name. The usability check decides.
+        candidate=""
+        IFS= read -r candidate < "$hostname_file" || true
+        candidate=$(_hb_shorten_hostname "$candidate")
+        if hb_usable_hostname "$candidate"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# ==============================================================================
 # HARDWARE SERIAL COLLECTION
 # ==============================================================================
 #

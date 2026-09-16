@@ -107,7 +107,18 @@ audit(){
 
  # Use SUDO_USER if running with sudo, otherwise use current user
  local actual_user="${SUDO_USER:-$(whoami)}"
- local hostname=$(hostname -s)
+
+ # Declared and assigned separately on purpose: `local x=$(cmd)` returns the
+ # builtin's exit status, not the command's, so a failing resolver would be
+ # invisible and the run would name its output with an empty hostname.
+ local hostname
+ if ! hostname=$(hb_resolve_short_hostname); then
+   echo "ERROR: could not determine this machine's hostname" >&2
+   echo "  Tried: uname -n, \$HOSTNAME, /etc/hostname" >&2
+   echo "  The hostname names the output directory and the tar archive," >&2
+   echo "  so the audit stops rather than producing output without one." >&2
+   exit 1
+ fi
 
  output=output-${hostname}-${actual_user}-$(date +"%d-%m-%Y")
  tarball=honeybadger-${hostname}-${actual_user}-$(date +"%d-%m-%Y").tar.gz
@@ -702,7 +713,15 @@ check-output(){
      exit 1
    fi
 
-   local target_dir=$(tar $list_flags "$tarball" | head -1 | cut -f1 -d"/")
+   # Separate statements so a failing `tar` is a failing `tar`: combined with
+   # `local` the listing's exit status would be discarded and an unreadable
+   # archive would continue on with an empty target directory name.
+   local target_dir
+   target_dir=$(tar $list_flags "$tarball" | head -1 | cut -f1 -d"/")
+   if [[ -z "$target_dir" ]]; then
+     echo "ERROR: Could not read the contents of $tarball"
+     exit 1
+   fi
 
    # Check if target directory already exists
    if [[ -d "$target_dir" ]]; then

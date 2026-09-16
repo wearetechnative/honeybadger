@@ -24,6 +24,12 @@ check. The serial is read from the kernel first, which works on every
 distribution without installing anything. See
 [Hardware serial number](#hardware-serial-number).
 
+**Note:** no hostname tool is required either. `hostname(1)` lives in
+`inetutils` and is not part of Arch's base install, so the audit resolves the
+machine's name from `uname -n`, then `$HOSTNAME`, then `/etc/hostname`. If none
+of the three yields a usable name the audit stops rather than writing output
+whose name has an empty hostname in it.
+
 #### Installing Lynis
 
 **Debian/Ubuntu:**
