@@ -68,3 +68,20 @@ solving a problem that need not exist.
 
 Add a test over the real directory names on compute2, including
 `pankhuri-prakash-IdeaPad-5-14ARE05-root`.
+
+## Reproduced independently on Arch
+
+Acceptance test for `honeybadger-ck4l`, stock Arch cloud image:
+
+    output-hb-arch-test-hbtest-16-09-2026
+      -> hostname=hb  username=arch  date=test-hbtest-16-09-2026
+
+The real user is `hbtest`. `asset-inventory.json` claims `"username": "arch"`;
+`fastfetch.json` has it right, so the two disagree within one submission.
+
+Two platforms, two different hostnames, the same corruption. Any hyphenated
+hostname hits it, which is most real fleet hosts - so production submissions are
+very likely already carrying wrong usernames today.
+
+`identity.hostname` survives only by accident: it comes from
+`lynis-report.json`, not from this regex.

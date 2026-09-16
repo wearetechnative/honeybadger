@@ -71,3 +71,20 @@ not determined, and distinct from a determined zero.
   does - lose nothing by not modelling it yet.
 - Worth deciding at the same time whether the same split applies elsewhere. It
   does not today: every other finding has a cell value the sheet accepts.
+
+## The null is ambiguous, and that matters now the server reads it
+
+Same serialised value, opposite meanings, seen on two platforms in one test run:
+
+| Platform | `value` | `finding`                                 | Truth                |
+|----------|---------|-------------------------------------------|----------------------|
+| Arch     | `null`  | no package audit tool present             | nothing determined   |
+| Ubuntu   | `null`  | "1 kwetsbare packages gevonden"           | determined, then lost|
+
+The emitter hardcodes `""` for this field, so `_inventory_finding` renders null
+in both cases. A consumer reading `inventory` cannot tell "not determined" from
+"determined but never written" - it can only tell by parsing the Dutch prose in
+`finding`, which is not an interface.
+
+This is no longer only a client-side loss: badgersbay reads `inventory` from
+`badgersbay-ucgi` onwards. Fix this before anything starts trusting the field.
