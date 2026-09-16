@@ -83,7 +83,7 @@
 - [ ] 9.14 Test submit command without any reports in directory
 
 ## 10. Security and Privacy Considerations
-- [ ] 9.1 Ensure HTTPS support for production use (curl --insecure flag for self-signed)
-- [ ] 9.2 Document data being transmitted (full JSON reports)
-- [ ] 9.3 Add option to exclude sensitive data from reports (future enhancement note)
-- [ ] 9.4 Ensure no credentials are logged in plain text
+- [ ] 10.1 Ensure HTTPS support for production use (curl --insecure flag for self-signed)
+- [ ] 10.2 Document data being transmitted (full JSON reports)
+- [ ] 10.3 Add option to exclude sensitive data from reports (future enhancement note)
+- [ ] 10.4 Ensure no credentials are logged in plain text
