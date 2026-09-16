@@ -514,6 +514,12 @@ audit(){
    # Generate asset inventory
    echo "Generating asset inventory..."
    generate_asset_inventory "$output" >/dev/null || echo "  Warning: Could not generate asset inventory"
+
+   # The xlsx report also writes asset-inventory.json into the output
+   # directory, which has to exist before the archive is created below - it is
+   # what lets the collection server read the audit's findings instead of
+   # deriving them again.
+   generate_xlsx_asset_row_report "$output" >/dev/null || echo "  Warning: Could not generate xlsx asset row report"
  else
    echo "  Skipping OS/kernel analysis (jq not available or lynis report missing)"
  fi

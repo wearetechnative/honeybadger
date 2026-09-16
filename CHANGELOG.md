@@ -4,6 +4,26 @@
 
 ### Added
 
+- **`asset-inventory.json`** - the machine-readable counterpart of
+  `asset-inventory.txt`, written into the output directory and therefore into
+  the archive. The audit already determined every value the ISO register needs
+  and wrote them twice for humans; the collection server can now read them
+  instead of an operator retyping them from the xlsx report.
+  - Emitted from the same determinations the xlsx report renders, so the two
+    cannot disagree
+  - Each finding carries the value and the finding it came from, because "Yes"
+    and "Yes (LUKS)" answer different questions
+  - A value the audit could not or would not determine is `null` with the
+    finding intact, which is distinguishable from a key this generation does
+    not report at all
+  - `schema_version` lets a consumer recognise a generation it does not fully
+    understand
+- The `audit` command now also generates the xlsx asset row report, which is
+  what writes `asset-inventory.json` into the output directory before the
+  archive is created
+
+### Added
+
 - **`--config <file>` and `HONEYBADGER_CONFIG`** name a configuration file and
   skip the search order. A named file that does not exist is an error rather
   than a silent fallback to whatever the search finds.

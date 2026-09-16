@@ -288,6 +288,44 @@ When the script has run successfully, a compressed archive with findings is stor
 
 Send this file to your CISO or the person who requested the audit.
 
+### Asset Inventory
+
+Each audit writes two views of the same findings into the output directory:
+
+| File | For |
+|------------------------|-----------------------------------------------|
+| `asset-inventory.txt` | Reading - a formatted table |
+| `asset-inventory.json` | The collection server, and anything else that parses |
+
+Plus `honeybadger-{user}-{date}-xlsx.md` in the current directory, which lists
+the cell values for the `Active Assets` sheet.
+
+All three come from one set of determinations. Whether a disk counts as
+encrypted or a hardening score as compliant is platform-specific knowledge that
+lives in this client, and a second implementation of those rules elsewhere would
+drift from it.
+
+Each finding in the JSON carries both the determined value and the finding it
+came from, because "Yes" and "Yes (LUKS)" answer different questions:
+
+```json
+"disk_encryption": { "value": "Yes", "finding": "Yes (LUKS)" }
+```
+
+A value the audit could not determine, or deliberately declines to assert, is
+`null` with the finding intact:
+
+```json
+"vulnerable_packages": {
+  "value": null,
+  "finding": "niet vastgesteld - geen package audit tool aanwezig"
+}
+```
+
+That is not the same as an absent key. `null` means "not determined, and here
+is why"; an absent key means this generation of the client does not report it at
+all. `schema_version` is how a consumer tells generations apart.
+
 ### Server Configuration
 
 Copy `.honeybadger.conf.example` to `.honeybadger.conf` and fill in the server

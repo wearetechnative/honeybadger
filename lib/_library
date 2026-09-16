@@ -2653,6 +2653,97 @@ _xlsx_markdown_table() {
 # iso27001-compliance-essential.xlsx. The spreadsheet itself is never read or
 # written - this report is input for a human who updates the register by hand.
 #
+# Render one finding for asset-inventory.json.
+#
+# A cell value of "N.A." means the audit could not determine it, and a value it
+# deliberately declines to assert - vulnerable packages, where the spreadsheet
+# contradicts itself about which value means compliant - is passed as the empty
+# string. Both serialise as null with the finding text intact, so a consumer can
+# tell "not determined, and here is why" from "this generation does not report
+# it at all", which an omitted key would not.
+#
+# Usage: _inventory_finding <json_key> <cell> <finding> [extra_key] [extra_value]
+_inventory_finding() {
+    local key="$1" cell="$2" finding="$3" extra_key="${4:-}" extra_value="${5:-}"
+    local value_json
+
+    if [[ -z "$cell" || "$cell" == "N.A." || "$cell" == "zie notitie" ]]; then
+        value_json="null"
+    elif [[ "$cell" =~ ^-?[0-9]+$ ]]; then
+        value_json="$cell"
+    else
+        value_json=$(printf '%s' "$cell" | jq -Rs .)
+    fi
+
+    if [[ -n "$extra_key" ]]; then
+        jq -nc --argjson value "$value_json" --arg finding "$finding" \
+            --arg ek "$extra_key" --arg ev "$extra_value" \
+            '{value: $value, finding: $finding} + {($ek): $ev}'
+    else
+        jq -nc --argjson value "$value_json" --arg finding "$finding" \
+            '{value: $value, finding: $finding}'
+    fi
+}
+
+# Write asset-inventory.json: the machine-readable counterpart of
+# asset-inventory.txt and the xlsx report.
+#
+# It is emitted from the same determinations the xlsx report renders, rather
+# than deriving them again. Whether a disk counts as encrypted or a hardening
+# score as compliant is platform-specific knowledge, and a second
+# implementation of those rules would drift from this one.
+#
+# Usage: _write_asset_inventory_json <output_dir> <hostname> <username> \
+#            <scan_date> <serial_cell> <model_cell> <findings_json>
+_write_asset_inventory_json() {
+    local output_dir="$1" hostname="$2" username="$3" scan_date="$4"
+    local serial_cell="$5" model_cell="$6" findings="$7"
+    local target="$output_dir/asset-inventory.json"
+
+    local serial_json="null"
+    if [[ -n "$serial_cell" && "$serial_cell" != "N.A." ]]; then
+        serial_json=$(printf '%s' "$serial_cell" | jq -Rs .)
+    fi
+    local model_json="null"
+    if [[ -n "$model_cell" && "$model_cell" != "N.A." ]]; then
+        model_json=$(printf '%s' "$model_cell" | jq -Rs .)
+    fi
+
+    local platform="linux"
+    case "$(uname -s)" in
+        Darwin) platform="macos" ;;
+        Linux) platform="linux" ;;
+    esac
+
+    jq -n \
+        --argjson schema_version 1 \
+        --arg generated_at "$(date -Iseconds)" \
+        --arg honeybadger_version "$(cat "$thisdir/VERSION-honeybadger" 2>/dev/null || echo unknown)" \
+        --arg platform "$platform" \
+        --argjson serial "$serial_json" \
+        --arg hostname "$hostname" \
+        --arg username "$username" \
+        --argjson model "$model_json" \
+        --arg scan_date "$scan_date" \
+        --argjson findings "$findings" \
+        '{
+            schema_version: $schema_version,
+            generated_at: $generated_at,
+            honeybadger_version: $honeybadger_version,
+            platform: $platform,
+            scan_date: $scan_date,
+            identity: {
+                serial: $serial,
+                hostname: $hostname,
+                username: $username,
+                model: $model
+            },
+            findings: $findings
+        }' > "$target"
+
+    echo "✓ Machine-readable asset inventory: $target"
+}
+
 # Usage: generate_xlsx_asset_row_report <output_dir>
 # Generates: honeybadger-{user}-{date}-xlsx.md
 generate_xlsx_asset_row_report() {
@@ -2962,5 +3053,33 @@ generate_xlsx_asset_row_report() {
     } > "$report_file"
 
     echo "✓ XLSX asset row report generated: $report_file"
+
+    # The same determinations, serialised for the collection server. Emitted
+    # here rather than derived again, so the two cannot disagree.
+    if command -v jq >/dev/null 2>&1; then
+        local findings
+        findings=$(jq -nc \
+            --argjson os "$(_inventory_finding os "$os_cell" "$os_src")" \
+            --argjson disk "$(_inventory_finding disk_encryption "$disk_cell" "$disk_src")" \
+            --argjson lock "$(_inventory_finding screen_lock "$lock_cell" "$lock_src")" \
+            --argjson fw "$(_inventory_finding firewall "$fw_cell" "$fw_src")" \
+            --argjson vuln "$(_inventory_finding vulnerable_packages "" "$vuln_finding")" \
+            --argjson score "$(_inventory_finding hardening_score "$score_cell" "$score_src" tool lynis)" \
+            --argjson uptodate "$(_inventory_finding os_uptodate "$uptodate_cell" "$uptodate_src")" \
+            '{
+                os: $os,
+                disk_encryption: $disk,
+                screen_lock: $lock,
+                firewall: $fw,
+                vulnerable_packages: $vuln,
+                hardening_score: $score,
+                os_uptodate: $uptodate
+            }')
+        _write_asset_inventory_json "$output_dir" "$hostname" "$username" \
+            "$scan_date" "$serial_cell" "$model_cell" "$findings"
+    else
+        echo "WARNING: jq not available - asset-inventory.json not written" >&2
+    fi
+
     return 0
 }
