@@ -332,7 +332,9 @@ After running an audit, you can submit reports to the server in two ways:
 
 #### Submit Individual JSON Reports
 
-Submit individual report files (neofetch.json, lynis-report.json, etc.):
+Submits `fastfetch.json` as report type `fastfetch` and `lynis-report.json` as
+report type `lynis`. A report the output directory does not contain counts as a
+failure, and `submit` exits non-zero if any report did not reach the server.
 
 ```bash
 # Submit the most recent audit reports
@@ -357,6 +359,14 @@ Submit the complete audit package as a single tar archive (simpler, single uploa
 **Server Requirements:**
 - Individual JSON submission uses endpoint: `SERVER_URL/`
 - Tar archive submission uses endpoint: `SERVER_URL/submit-tar`
+- The tar path sends no report types of its own: the server derives them from
+  the file names inside the archive, which are the same names the individual
+  submission reads
+
+The server answers HTTP 207 when it stored a submission but could not resolve it
+fully - most often because the hardware serial is not in the asset register.
+Both submission paths treat that as submitted and print the server's remark
+rather than resending the same evidence.
 
 **Note:** Report submission is completely separate from the audit command. The audit generates local reports only. You must explicitly run the submit command to send reports to the server.
 

@@ -10,7 +10,10 @@ lib/os-kernel-status.txt
 os-kernel-status.txt
 .honeybadger.conf
 *.zip
-report-**
+# Generated report files in the repository root.
+# Anchored: an unanchored pattern also swallowed the openspec
+# report-submission capability, in changes/ as well as in specs/
+/report-**
 # Audit output, generated in the repository root.
 # Anchored: an unanchored pattern also swallowed .beans/honeybadger-*.md
 /honeybadger-*.md

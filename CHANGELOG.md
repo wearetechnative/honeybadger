@@ -24,6 +24,24 @@
 
 ### Fixed
 
+- **`submit` rejected for the system information report** - `./RUNME.sh submit` failed with
+  `HTTP 400` for the system information report while `submit-tar` succeeded
+  - The client read `fastfetch.json` but still labelled it `X-Report-Type: neofetch`, a type
+    badgersbay retired when it moved to fastfetch. It now submits the report as `fastfetch`
+  - `submit-tar` was never affected: the server derives the report type from the file name inside
+    the archive, and the archive has carried `fastfetch.json` all along
+- **A report that was never sent counted as a success** - A missing `fastfetch.json` was reported
+  as a skip, and `submit` exited 0 as long as one report went through
+  - A missing report file is now a failure that names the file it expected, and `submit` exits
+    non-zero when any report did not reach the server
+- **Rejections gave the status code and nothing else** - Both submission paths discarded the
+  response body, so `HTTP 400` arrived without the sentence explaining it
+  - The server's message is now printed with the failure, lifted out of the error page when the
+    server answers with one
+- **A stored tar submission was retried as a failure** - badgersbay answers HTTP 207 when it
+  stored a submission it could not match to an asset register entry; the client treated anything
+  other than 200 as a failure and resent the same archive
+  - Both paths now accept any 2xx, name a 207 a partial submission, and print the server's remark
 - **Hardware serial never determined on half the fleet** - The audit now reads the serial from the
   kernel instead of depending on `dmidecode` being installed
   - `/sys/class/dmi/id/product_serial` is the primary source: root-only, but the audit already
