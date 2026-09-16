@@ -1,15 +1,25 @@
 ---
 # honeybadger-epzu
 title: Deploy the client configuration through a NixOS module
-status: todo
+status: scrapped
 type: task
 priority: normal
 tags:
     - honeybadger
     - config
 created_at: 2026-09-16T06:27:27Z
-updated_at: 2026-09-16T06:27:27Z
+updated_at: 2026-09-16T06:32:39Z
 parent: honeybadger-6dkw
+---
+
+**Scrapped: the premise was wrong.**
+
+`.honeybadger.conf` being local and hand-placed is the design, not a gap. The
+user holds their own token, issued by the badgersbay administrator, and the
+allowlist lives in `badgersbay-tokens.age`. Deploying the file centrally would
+work against that boundary, and the audited machines are personal laptops
+rather than servers under configuration management.
+
 ---
 
 Nothing manages the client configuration. Searching
