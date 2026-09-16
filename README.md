@@ -288,6 +288,49 @@ When the script has run successfully, a compressed archive with findings is stor
 
 Send this file to your CISO or the person who requested the audit.
 
+### Server Configuration
+
+Copy `.honeybadger.conf.example` to `.honeybadger.conf` and fill in the server
+URL and the token the badgersbay administrator issued you. The file is local to
+each machine and gitignored; the token is what distinguishes you from anyone
+else who might try to upload.
+
+Settings resolve in this order, first match wins:
+
+| Source | Example |
+|--------------------|---------------------------------------------|
+| Environment | `SERVER_URL=http://localhost:7123/ ./RUNME.sh submit` |
+| Configuration file | `SERVER_URL=https://badgersbay.example/` |
+| Built-in default | `http://localhost:7123/` |
+
+The environment winning is deliberate and announced in the output, because a
+configuration file that can be silently overridden is its own kind of surprise:
+
+```
+Loading configuration from: ./.honeybadger.conf
+From the environment (overriding the file): DRY_RUN
+```
+
+A setting exported as an empty string counts as supplied, so an intentionally
+empty token is not quietly refilled from the file.
+
+#### Naming a configuration file
+
+```bash
+# On the command line
+./RUNME.sh submit --config /path/to/test.conf
+
+# Or from the environment, for callers that cannot pass arguments
+HONEYBADGER_CONFIG=/path/to/test.conf ./RUNME.sh submit
+```
+
+Either skips the search order entirely. A named file that does not exist is an
+error rather than a silent fallback - falling back would submit somewhere you
+did not ask for.
+
+Without one, the search order is `./.honeybadger.conf`, then
+`~/.honeybadger.conf`, then `/etc/honeybadger.conf`.
+
 ### Submitting Reports
 
 After running an audit, submit the archive:

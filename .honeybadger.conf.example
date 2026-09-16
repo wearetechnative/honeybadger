@@ -1,5 +1,17 @@
 # Honeybadger Server Configuration
 # Copy this file to .honeybadger.conf, ~/.honeybadger.conf, or /etc/honeybadger.conf
+#
+# Anything set in the environment overrides what this file says, and the client
+# reports which settings it took from there. That is how a single run can be
+# pointed somewhere else without editing this file:
+#
+#   SERVER_URL=http://localhost:7123/ ./RUNME.sh submit
+#   DRY_RUN=true ./RUNME.sh submit
+#
+# To use a different file entirely:
+#
+#   ./RUNME.sh submit --config /path/to/other.conf
+#   HONEYBADGER_CONFIG=/path/to/other.conf ./RUNME.sh submit
 
 # Enable/disable server submission (default: false)
 SERVER_ENABLED=false

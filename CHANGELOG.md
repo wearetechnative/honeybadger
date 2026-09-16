@@ -2,6 +2,24 @@
 
 ## NEXT VERSION
 
+### Added
+
+- **`--config <file>` and `HONEYBADGER_CONFIG`** name a configuration file and
+  skip the search order. A named file that does not exist is an error rather
+  than a silent fallback to whatever the search finds.
+
+### Changed
+
+- **The environment now overrides the configuration file.** Settings resolve as
+  environment, then file, then built-in default. The file used to be sourced
+  after the defaults were applied, so it always won and an environment variable
+  could never take effect - which meant `DRY_RUN=true` could not switch on a dry
+  run when the file had `DRY_RUN=false`. A real archive was submitted twice
+  while attempting a dry run.
+  - The settings the environment supplied are reported, because a configuration
+    file that can be silently overridden is its own kind of surprise
+  - A setting exported as an empty string counts as supplied and is not refilled
+
 ### Changed
 
 - **`submit` now submits the audit archive** - BEHAVIOUR CHANGE. It previously
