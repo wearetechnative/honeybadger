@@ -238,6 +238,41 @@ get_kernel_info() {
 # OS INFORMATION EXTRACTION
 # ==============================================================================
 
+# The one system information format this client reads.
+#
+# fastfetch.json is what the audit writes and the only member the collection
+# server accepts. Reading neofetch.json, neofetch.txt or fastfetch.txt as well
+# kept a retired shape alive in the code that most needs one shape, and the
+# legacy path carried no kernel_latest - so a directory that took it produced a
+# report with the kernel comparison silently missing.
+#
+# A directory without fastfetch.json is missing its system information. It is
+# not a directory in an older format to be read differently.
+#
+# Usage: require_fastfetch_json <output_dir>
+# Returns: 0 when present, 1 otherwise (with an explanation on stderr)
+require_fastfetch_json() {
+    local output_dir="$1"
+
+    [[ -f "$output_dir/fastfetch.json" ]] && return 0
+
+    echo "ERROR: $output_dir/fastfetch.json is missing" >&2
+    echo "  System information is read from fastfetch.json and nothing else." >&2
+    echo "  It is written by: sudo ./RUNME.sh audit" >&2
+
+    local legacy found=""
+    for legacy in neofetch.json neofetch.txt fastfetch.txt; do
+        [[ -f "$output_dir/$legacy" ]] && found+=" $legacy"
+    done
+    if [[ -n "$found" ]]; then
+        echo "  This directory carries a retired format ($found ) from before the" >&2
+        echo "  fastfetch migration. Those archives stay readable, but re-analysis" >&2
+        echo "  needs an audit from a current client." >&2
+    fi
+
+    return 1
+}
+
 # Extract OS information from Honeybadger output directory
 # Usage: extract_os_info <output_dir>
 # Sets global variables: OS_NAME, OS_VERSION, OS_CODENAME, OS_FULLNAME, KERNEL_VERSION
@@ -261,32 +296,12 @@ extract_os_info() {
         fi
     fi
 
-    # Prefer fastfetch.json, fallback to neofetch.json, neofetch.txt, or fastfetch.txt
-    local fetch_file=""
-    local fetch_format=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        fetch_file="$output_dir/fastfetch.json"
-        fetch_format="json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        fetch_file="$output_dir/neofetch.json"
-        fetch_format="json"
-    elif [[ -f "$output_dir/neofetch.txt" ]]; then
-        fetch_file="$output_dir/neofetch.txt"
-        fetch_format="txt"
-    elif [[ -f "$output_dir/fastfetch.txt" ]]; then
-        fetch_file="$output_dir/fastfetch.txt"
-        fetch_format="txt"
-    fi
+    local fetch_file="$output_dir/fastfetch.json"
 
-    if [[ -n "$fetch_file" ]]; then
+    if [[ -f "$fetch_file" ]]; then
         # Get OS info if not already set
         if [[ -z "$OS_NAME" ]]; then
-            if [[ "$fetch_format" == "json" ]]; then
-                OS_FULLNAME=$(jq -r '.os // empty' "$fetch_file" 2>/dev/null)
-            else
-                local os_line=$(grep "^OS:" "$fetch_file" | head -1)
-                [[ -n "$os_line" ]] && OS_FULLNAME=$(echo "$os_line" | sed 's/^OS: //')
-            fi
+            OS_FULLNAME=$(jq -r '.os // empty' "$fetch_file" 2>/dev/null)
 
             if [[ -n "$OS_FULLNAME" ]]; then
                 # Handle different formats
@@ -303,15 +318,8 @@ extract_os_info() {
 
         # Always try to get kernel from fetch file
         if [[ -z "$KERNEL_VERSION" ]]; then
-            if [[ "$fetch_format" == "json" ]]; then
-                KERNEL_RAW=$(jq -r '.kernel // empty' "$fetch_file" 2>/dev/null)
-                [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
-            else
-                local kernel_line=$(grep "^Kernel:" "$fetch_file" | head -1)
-                if [[ -n "$kernel_line" ]]; then
-                    KERNEL_VERSION=$(echo "$kernel_line" | grep -oP '\d+\.\d+\.\d+' | head -1)
-                fi
-            fi
+            KERNEL_RAW=$(jq -r '.kernel // empty' "$fetch_file" 2>/dev/null)
+            [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
         fi
     fi
 
@@ -340,6 +348,9 @@ check_os_status() {
         echo "ERROR: Directory $output_dir does not exist"
         return 1
     fi
+
+    # Before anything is fetched or written: no system information, no analysis.
+    require_fastfetch_json "$output_dir" || return 1
 
     # Fetch latest release info if needed
     if [[ ! -d "$cache_dir" ]] || [[ ! -f "$cache_dir/nixos-releases.json" ]]; then
@@ -829,6 +840,88 @@ generate_status_summary() {
 }
 
 # ==============================================================================
+# HOSTNAME RESOLUTION
+# ==============================================================================
+#
+# The hostname names the output directory and the tar archive, so the fleet can
+# tell one submission from another. It is resolved from sources that exist
+# everywhere rather than from hostname(1), which is not part of Arch's base
+# install - a host without inetutils used to produce output--<user>-<date> and
+# say nothing about it.
+#
+# Order, each consulted only when the previous produced nothing usable:
+#
+#   1. uname -n         coreutils; asks the kernel, so it cannot be stale
+#   2. $HOSTNAME        set by bash itself; needs no executable at all
+#   3. /etc/hostname    configuration rather than state, hence last
+
+# Whether a candidate can serve as a path component and part of a filename.
+# This is not a DNS check: "localhost" is a poor name for a fleet asset but it
+# is what the machine is called, and substituting something else invents data.
+# Usage: hb_usable_hostname <value>
+# Returns: 0 when usable, 1 otherwise
+hb_usable_hostname() {
+    local value="$1"
+
+    [[ -z "$value" ]] && return 1
+    # uname -n on a misconfigured host has been seen to return a bare newline
+    [[ "$value" =~ [[:space:]] ]] && return 1
+    [[ "$value" =~ [[:cntrl:]] ]] && return 1
+    # A slash would silently move where the output directory is created
+    [[ "$value" == */* ]] && return 1
+
+    return 0
+}
+
+# Cut a fully qualified name down to its first label, as `hostname -s` did.
+# A name without a dot comes back unchanged.
+_hb_shorten_hostname() {
+    printf '%s' "${1%%.*}"
+}
+
+# Print the machine's short hostname on stdout.
+# Returns 1 and prints nothing when no source yields a usable name; the caller
+# decides what that means. Declaration and assignment are kept apart on purpose:
+# `local x=$(cmd)` returns the builtin's status, not the command's, which is how
+# the missing hostname(1) stayed invisible in the first place.
+hb_resolve_short_hostname() {
+    local hostname_file="${HB_HOSTNAME_FILE:-/etc/hostname}"
+    local candidate=""
+
+    if command -v uname >/dev/null 2>&1; then
+        if candidate=$(uname -n 2>/dev/null); then
+            candidate=$(_hb_shorten_hostname "$candidate")
+            if hb_usable_hostname "$candidate"; then
+                printf '%s' "$candidate"
+                return 0
+            fi
+        fi
+    fi
+
+    candidate=$(_hb_shorten_hostname "${HOSTNAME:-}")
+    if hb_usable_hostname "$candidate"; then
+        printf '%s' "$candidate"
+        return 0
+    fi
+
+    if [[ -r "$hostname_file" ]]; then
+        # The `read` builtin takes the first line without spawning anything, so
+        # this source works even where coreutils is unavailable. Its status is
+        # ignored deliberately: a file with no trailing newline makes it return
+        # 1 while still having read the name. The usability check decides.
+        candidate=""
+        IFS= read -r candidate < "$hostname_file" || true
+        candidate=$(_hb_shorten_hostname "$candidate")
+        if hb_usable_hostname "$candidate"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# ==============================================================================
 # HARDWARE SERIAL COLLECTION
 # ==============================================================================
 #
@@ -1151,6 +1244,117 @@ read_recorded_serial() {
 }
 
 # ==============================================================================
+# AUDIT IDENTITY RESOLUTION
+# ==============================================================================
+#
+# Who ran the audit, and when. Both used to be recovered by parsing them back
+# out of the output directory's name, which is a lossy encoding: it joins
+# hostname, username and date with "-" and lets all three contain "-". The old
+# pattern - output-([^-]+)-([^-]+)-(.+)$ - could not span a hyphen, so every
+# hyphenated hostname shifted the fields and named a user that does not exist
+# on the machine.
+#
+# The username is not decoded any more. RUNME.sh runs fastfetch as the invoking
+# user for exactly this purpose, so fastfetch.json's .user is the value the
+# directory name was built from, recorded before the encoding lost it.
+
+# Parse an audit output directory name into its three fields.
+#
+# Anchored on the DD-MM-YYYY suffix and taking the last hyphen-free segment
+# before it as the username, which leaves the whole remainder as the hostname.
+# That is correct for every real directory name we hold, including
+# output-pankhuri-prakash-IdeaPad-5-14ARE05-root-02-04-2026. It is still wrong
+# for a username containing a hyphen, which is why this is the last resort
+# rather than the answer.
+#
+# Usage: hb_parse_output_dirname <dirname>
+# Sets: HB_DIR_HOSTNAME / HB_DIR_USERNAME / HB_DIR_DATE
+# Returns: 0 when the name parsed, 1 otherwise (all three left empty)
+hb_parse_output_dirname() {
+    local name="$1"
+
+    HB_DIR_HOSTNAME=""
+    HB_DIR_USERNAME=""
+    HB_DIR_DATE=""
+
+    if [[ "$name" =~ ^output-(.+)-([^-]+)-([0-9]{2}-[0-9]{2}-[0-9]{4})$ ]]; then
+        # shellcheck disable=SC2034  # part of this function's contract; read by callers
+        HB_DIR_HOSTNAME="${BASH_REMATCH[1]}"
+        HB_DIR_USERNAME="${BASH_REMATCH[2]}"
+        HB_DIR_DATE="${BASH_REMATCH[3]}"
+        return 0
+    fi
+
+    return 1
+}
+
+# The directory's own name, without running basename(1). Pure expansion, so it
+# works under a restricted PATH - which the test suite deliberately uses.
+_hb_dir_basename() {
+    local path="${1%/}"
+    printf '%s' "${path##*/}"
+}
+
+# Print the username the audit recorded, on stdout.
+#
+# Order, each consulted only when the previous produced nothing:
+#
+#   1. fastfetch.json .user   what the audit recorded, run as the real user
+#   2. the directory name     a directory whose fetch file is unreadable
+#
+# Returns 1 and prints nothing when no source answers, so the caller decides
+# what an unknown user means instead of being handed a plausible default.
+#
+# Usage: hb_audit_username <output_dir>
+hb_audit_username() {
+    local output_dir="$1"
+    local candidate=""
+    local fetch_json="$output_dir/fastfetch.json"
+
+    if [[ -f "$fetch_json" ]] && command -v jq >/dev/null 2>&1; then
+        candidate=$(jq -r '.user // empty' "$fetch_json" 2>/dev/null)
+        if [[ -n "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    fi
+
+    if hb_parse_output_dirname "$(_hb_dir_basename "$output_dir")"; then
+        if [[ -n "$HB_DIR_USERNAME" ]]; then
+            printf '%s' "$HB_DIR_USERNAME"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Print the filename a report of the given kind should be written to.
+#
+# honeybadger-{user}-{date}-{kind}.md when both are known. When they are not,
+# the run cannot be named after a person, so it is named after the kind and
+# today's date rather than after a user we would be inventing.
+#
+# Usage: hb_report_basename <output_dir> <kind>
+hb_report_basename() {
+    local output_dir="$1" kind="$2"
+    local username=""
+
+    username=$(hb_audit_username "$output_dir") || username=""
+
+    # hb_audit_username() leaves HB_DIR_DATE set only when it fell through to
+    # the directory name, so parse explicitly rather than relying on that.
+    hb_parse_output_dirname "$(_hb_dir_basename "$output_dir")" || true
+
+    if [[ -n "$username" && -n "$HB_DIR_DATE" ]]; then
+        printf 'honeybadger-%s-%s-%s.md' "$username" "$HB_DIR_DATE" "$kind"
+        return 0
+    fi
+
+    printf 'honeybadger-%s-%s.md' "$kind" "$(date +%d-%m-%Y)"
+}
+
+# ==============================================================================
 # ASSET INVENTORY FUNCTIONS
 # ==============================================================================
 
@@ -1178,7 +1382,10 @@ generate_asset_inventory() {
     local malware_scanner="Unknown"
     local firewall_active="Unknown"
     local os_uptodate="Unknown"
-    local owner=""
+    # Through the same resolver asset-inventory.json uses, so the two files
+    # agree by construction rather than by comment.
+    local owner
+    owner=$(hb_audit_username "$output_dir") || owner=""
     local report_date=""
     local hardening_score=""
     local hardening_status=""
@@ -1238,17 +1445,9 @@ generate_asset_inventory() {
         serial="$HB_SERIAL_STATUS"
     fi
 
-    # Get hardware info from fastfetch.json, neofetch.json or neofetch.txt
-    local _hw_json=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        _hw_json="$output_dir/fastfetch.json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        _hw_json="$output_dir/neofetch.json"
-    fi
-
-    if [[ -n "$_hw_json" ]]; then
-        # Extract from JSON
-        owner=$(jq -r '.user // empty' "$_hw_json" 2>/dev/null)
+    # Get hardware info from fastfetch.json
+    local _hw_json="$output_dir/fastfetch.json"
+    if [[ -f "$_hw_json" ]]; then
         model=$(jq -r '.host // empty' "$_hw_json" 2>/dev/null)
         kernel=$(jq -r '.kernel // empty' "$_hw_json" 2>/dev/null)
 
@@ -1256,15 +1455,6 @@ generate_asset_inventory() {
         if [[ "$hostname" == "Unknown" ]]; then
             local json_hostname=$(jq -r '.hostname // empty' "$_hw_json" 2>/dev/null)
             [[ -n "$json_hostname" ]] && hostname="$json_hostname"
-        fi
-    elif [[ -f "$output_dir/neofetch.txt" ]]; then
-        # Fallback to text parsing for backward compatibility
-        owner=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f1 | head -1)
-        model=$(grep "^Host:" "$output_dir/neofetch.txt" | sed 's/^Host: //' | head -1)
-        kernel=$(grep "^Kernel:" "$output_dir/neofetch.txt" | sed 's/^Kernel: //' | head -1)
-
-        if [[ "$hostname" == "Unknown" ]]; then
-            hostname=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f2 | awk '{print $1}' | head -1)
         fi
     fi
 
@@ -1292,16 +1482,11 @@ generate_asset_inventory() {
     # Check for Nix installation
     if [[ "$os_full" =~ "NixOS" ]]; then
         nix_installed="Yes (NixOS)"
-    elif [[ -f "$output_dir/fastfetch.json" ]] || [[ -f "$output_dir/neofetch.json" ]]; then
-        # Check JSON for nix packages (prefer fastfetch.json)
-        local _nix_json=""
-        [[ -f "$output_dir/fastfetch.json" ]] && _nix_json="$output_dir/fastfetch.json" || _nix_json="$output_dir/neofetch.json"
-        local packages=$(jq -r '.packages // empty' "$_nix_json" 2>/dev/null)
+    elif [[ -f "$output_dir/fastfetch.json" ]]; then
+        local packages=$(jq -r '.packages // empty' "$output_dir/fastfetch.json" 2>/dev/null)
         if [[ -n "$packages" ]] && echo "$packages" | grep -q "nix-"; then
             nix_installed="Yes"
         fi
-    elif [[ -f "$output_dir/neofetch.txt" ]] && grep -q "nix-" "$output_dir/neofetch.txt"; then
-        nix_installed="Yes"
     elif [[ -f "$output_dir/installed-packages.txt" ]] && grep -qi "nix" "$output_dir/installed-packages.txt"; then
         nix_installed="Yes"
     else
@@ -1894,9 +2079,8 @@ is_nixos() {
         fi
     fi
 
-    # Fallback: check fastfetch.json or neofetch.json
-    local _os_json=""
-    [[ -f "$output_dir/fastfetch.json" ]] && _os_json="$output_dir/fastfetch.json" || _os_json="$output_dir/neofetch.json"
+    # Fallback: check fastfetch.json
+    local _os_json="$output_dir/fastfetch.json"
     if [[ -f "$_os_json" ]] && command -v jq >/dev/null 2>&1; then
         local os=$(jq -r '.os // ""' "$_os_json" 2>/dev/null)
         if [[ "$os" =~ "NixOS" ]]; then
@@ -2164,20 +2348,14 @@ generate_compliance_report() {
         return 1
     fi
 
-    # Extract username and date from output directory name
-    # Format: output-{hostname}-{user}-{date}
-    local dirname=$(basename "$output_dir")
-    local report_file=""
+    # Who ran the audit comes from what the audit recorded, not from the
+    # directory name: that name joins hostname, username and date with "-" and
+    # cannot be decoded when the hostname has one of its own.
+    local username
+    username=$(hb_audit_username "$output_dir") || username=""
 
-    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
-        local hostname="${BASH_REMATCH[1]}"
-        local username="${BASH_REMATCH[2]}"
-        local datepart="${BASH_REMATCH[3]}"
-        report_file="honeybadger-${username}-${datepart}-compliance.md"
-    else
-        # Fallback
-        report_file="honeybadger-compliance-$(date +%d-%m-%Y).md"
-    fi
+    local report_file
+    report_file=$(hb_report_basename "$output_dir" compliance)
 
     # Run compliance checks
     # Note: Capture exit code AFTER each function call, not on same line as local declaration
@@ -2426,18 +2604,8 @@ generate_lynis_actions_report() {
         return 1
     fi
 
-    # Extract username and date from output directory name
-    local dirname=$(basename "$output_dir")
-    local report_file=""
-
-    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
-        local hostname="${BASH_REMATCH[1]}"
-        local username="${BASH_REMATCH[2]}"
-        local datepart="${BASH_REMATCH[3]}"
-        report_file="honeybadger-${username}-${datepart}-actions.md"
-    else
-        report_file="honeybadger-actions-$(date +%d-%m-%Y).md"
-    fi
+    local report_file
+    report_file=$(hb_report_basename "$output_dir" actions)
 
     # Get metadata
     local hostname=$(jq -r '.hostname // "Unknown"' "$lynis_file" 2>/dev/null)
@@ -2662,22 +2830,45 @@ _xlsx_markdown_table() {
 # tell "not determined, and here is why" from "this generation does not report
 # it at all", which an omitted key would not.
 #
+# A null cell is not the same as a missing measurement. Where the audit
+# determined something the sheet has no unambiguous cell for, the determination
+# travels as an extra field - vulnerable_packages carries `count` beside its
+# null `value` - so refusing to fill in a cell never costs a measurement.
+#
+# Render one value as the JSON scalar it is: nothing becomes null, a whole
+# number becomes a number, anything else a string. Used for the cell and for the
+# extras alike, so a count arrives as 1 rather than as "1" - a number inside a
+# string is a number the consumer has to parse, and can parse wrongly.
+# Usage: _inventory_scalar <raw>
+_inventory_scalar() {
+    local raw="$1"
+
+    if [[ -z "$raw" ]]; then
+        printf 'null'
+    elif [[ "$raw" =~ ^(0|-?[1-9][0-9]*)$ ]]; then
+        # Canonical integers only. jq reads "007" as 7, so a non-canonical form
+        # would be silently reinterpreted rather than carried as written.
+        printf '%s' "$raw"
+    else
+        printf '%s' "$raw" | jq -Rs .
+    fi
+}
+
 # Usage: _inventory_finding <json_key> <cell> <finding> [extra_key] [extra_value]
 _inventory_finding() {
     local key="$1" cell="$2" finding="$3" extra_key="${4:-}" extra_value="${5:-}"
     local value_json
 
-    if [[ -z "$cell" || "$cell" == "N.A." || "$cell" == "zie notitie" ]]; then
-        value_json="null"
-    elif [[ "$cell" =~ ^-?[0-9]+$ ]]; then
-        value_json="$cell"
-    else
-        value_json=$(printf '%s' "$cell" | jq -Rs .)
+    # "N.A." and "zie notitie" are the spreadsheet's spellings of "no value
+    # here", so they are mapped before the general rule rather than inside it.
+    if [[ "$cell" == "N.A." || "$cell" == "zie notitie" ]]; then
+        cell=""
     fi
+    value_json=$(_inventory_scalar "$cell")
 
     if [[ -n "$extra_key" ]]; then
         jq -nc --argjson value "$value_json" --arg finding "$finding" \
-            --arg ek "$extra_key" --arg ev "$extra_value" \
+            --arg ek "$extra_key" --argjson ev "$(_inventory_scalar "$extra_value")" \
             '{value: $value, finding: $finding} + {($ek): $ev}'
     else
         jq -nc --argjson value "$value_json" --arg finding "$finding" \
@@ -2716,9 +2907,9 @@ _write_asset_inventory_json() {
     esac
 
     jq -n \
-        --argjson schema_version 1 \
+        --argjson schema_version 2 \
         --arg generated_at "$(date -Iseconds)" \
-        --arg honeybadger_version "$(cat "$thisdir/VERSION-honeybadger" 2>/dev/null || echo unknown)" \
+        --arg honeybadger_version "$(cat "${thisdir:-.}/VERSION-honeybadger" 2>/dev/null || echo unknown)" \
         --arg platform "$platform" \
         --argjson serial "$serial_json" \
         --arg hostname "$hostname" \
@@ -2754,19 +2945,11 @@ generate_xlsx_asset_row_report() {
         return 1
     fi
 
-    # Extract username and date from output directory name
-    # Format: output-{hostname}-{user}-{date}
-    local dirname=$(basename "$output_dir")
-    local report_file=""
-    local username=""
+    local username
+    username=$(hb_audit_username "$output_dir") || username=""
 
-    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
-        username="${BASH_REMATCH[2]}"
-        local datepart="${BASH_REMATCH[3]}"
-        report_file="honeybadger-${username}-${datepart}-xlsx.md"
-    else
-        report_file="honeybadger-xlsx-$(date +%d-%m-%Y).md"
-    fi
+    local report_file
+    report_file=$(hb_report_basename "$output_dir" xlsx)
 
     local lynis_file="$output_dir/lynis-report.json"
     local have_lynis=false
@@ -2822,16 +3005,13 @@ generate_xlsx_asset_row_report() {
     # --- C hint + E: Model --------------------------------------------------
     local model_cell="N.A."
     local model_src="fastfetch.json niet beschikbaar"
+    # Already the audit's own determination. This used to start from the
+    # directory name and be corrected from fastfetch a few lines down;
+    # hb_audit_username() reads that same field, so there is one source.
     local scan_user="$username"
 
-    local hw_json=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        hw_json="$output_dir/fastfetch.json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        hw_json="$output_dir/neofetch.json"
-    fi
-
-    if [[ -n "$hw_json" ]] && command -v jq >/dev/null 2>&1; then
+    local hw_json="$output_dir/fastfetch.json"
+    if [[ -f "$hw_json" ]] && command -v jq >/dev/null 2>&1; then
         local model_raw=$(jq -r '.host // ""' "$hw_json" 2>/dev/null)
         if [[ -n "$model_raw" ]]; then
             model_cell="$model_raw"
@@ -2839,8 +3019,6 @@ generate_xlsx_asset_row_report() {
         else
             model_src="host ontbreekt in $(basename "$hw_json")"
         fi
-        local user_raw=$(jq -r '.user // ""' "$hw_json" 2>/dev/null)
-        [[ -n "$user_raw" ]] && scan_user="$user_raw"
     else
         unavailable+=("fastfetch.json - model")
     fi
@@ -2904,7 +3082,12 @@ generate_xlsx_asset_row_report() {
     # --- J: Vulnerable Packages / Defender ----------------------------------
     # Deliberately no cell value: the register contradicts itself about which
     # literal means compliant. Report the finding and let the operator choose.
+    #
+    # The count is a different question, and one the audit can answer. It
+    # travels separately so that declining to fill in the cell does not throw
+    # away a measurement. Empty means nothing was measured, not zero.
     local vuln_finding="niet vastgesteld - lynis-report.json niet beschikbaar"
+    local vuln_count_cell=""
 
     if [[ "$have_lynis" == true ]]; then
         local audit_tool=$(jq -r '.package_audit_tool_found // "0"' "$lynis_file" 2>/dev/null)
@@ -2912,12 +3095,16 @@ generate_xlsx_asset_row_report() {
 
         if [[ "$audit_tool" != "1" ]]; then
             # A count of 0 here means "nothing looked", not "nothing found".
-            # This is the condition Lynis raises as PKGS-7398.
+            # This is the condition Lynis raises as PKGS-7398. Reporting it as
+            # zero would be the worse bug: a fleet that never looked, filed as
+            # clean.
             vuln_finding="niet vastgesteld - geen package audit tool aanwezig"
         elif [[ "$vuln_count" == "0" ]]; then
             vuln_finding="geen kwetsbare packages gevonden"
+            vuln_count_cell="0"
         else
             vuln_finding="$vuln_count kwetsbare packages gevonden"
+            vuln_count_cell="$vuln_count"
         fi
     fi
 
@@ -3063,7 +3250,7 @@ generate_xlsx_asset_row_report() {
             --argjson disk "$(_inventory_finding disk_encryption "$disk_cell" "$disk_src")" \
             --argjson lock "$(_inventory_finding screen_lock "$lock_cell" "$lock_src")" \
             --argjson fw "$(_inventory_finding firewall "$fw_cell" "$fw_src")" \
-            --argjson vuln "$(_inventory_finding vulnerable_packages "" "$vuln_finding")" \
+            --argjson vuln "$(_inventory_finding vulnerable_packages "" "$vuln_finding" count "$vuln_count_cell")" \
             --argjson score "$(_inventory_finding hardening_score "$score_cell" "$score_src" tool lynis)" \
             --argjson uptodate "$(_inventory_finding os_uptodate "$uptodate_cell" "$uptodate_src")" \
             '{

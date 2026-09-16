@@ -107,7 +107,18 @@ audit(){
 
  # Use SUDO_USER if running with sudo, otherwise use current user
  local actual_user="${SUDO_USER:-$(whoami)}"
- local hostname=$(hostname -s)
+
+ # Declared and assigned separately on purpose: `local x=$(cmd)` returns the
+ # builtin's exit status, not the command's, so a failing resolver would be
+ # invisible and the run would name its output with an empty hostname.
+ local hostname
+ if ! hostname=$(hb_resolve_short_hostname); then
+   echo "ERROR: could not determine this machine's hostname" >&2
+   echo "  Tried: uname -n, \$HOSTNAME, /etc/hostname" >&2
+   echo "  The hostname names the output directory and the tar archive," >&2
+   echo "  so the audit stops rather than producing output without one." >&2
+   exit 1
+ fi
 
  output=output-${hostname}-${actual_user}-$(date +"%d-%m-%Y")
  tarball=honeybadger-${hostname}-${actual_user}-$(date +"%d-%m-%Y").tar.gz
@@ -702,7 +713,15 @@ check-output(){
      exit 1
    fi
 
-   local target_dir=$(tar $list_flags "$tarball" | head -1 | cut -f1 -d"/")
+   # Separate statements so a failing `tar` is a failing `tar`: combined with
+   # `local` the listing's exit status would be discarded and an unreadable
+   # archive would continue on with an empty target directory name.
+   local target_dir
+   target_dir=$(tar $list_flags "$tarball" | head -1 | cut -f1 -d"/")
+   if [[ -z "$target_dir" ]]; then
+     echo "ERROR: Could not read the contents of $tarball"
+     exit 1
+   fi
 
    # Check if target directory already exists
    if [[ -d "$target_dir" ]]; then
@@ -790,6 +809,15 @@ check-output(){
    fi
  fi
 
+ # No system information, no analysis. Checked before anything is fetched or
+ # written, so a directory in a retired format is left exactly as it was found.
+ if ! require_fastfetch_json "$output_dir"; then
+   if [[ "$cleanup_extracted" == true ]]; then
+     rm -rf "$output_dir"
+   fi
+   exit 1
+ fi
+
  # Fetch latest release information if cache doesn't exist or is old
  echo ""
  echo "Checking for latest release information..."
@@ -797,9 +825,8 @@ check-output(){
  echo ""
 
  # Run the OS status check
- check_os_status "$output_dir"
-
- local exit_code=$?
+ local exit_code=0
+ check_os_status "$output_dir" || exit_code=$?
 
  # Generate asset inventory
  echo ""

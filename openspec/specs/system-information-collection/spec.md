@@ -6,7 +6,7 @@ This specification defines how the Honeybadger audit system collects and stores 
 ## Requirements
 
 ### Requirement: JSON-based System Information Storage
-The audit system SHALL generate system information in JSON format for structured data access using fastfetch with the honeybadger-shipped config.
+The audit system SHALL generate system information in JSON format for structured data access using fastfetch with the honeybadger-shipped config, and SHALL read system information from `fastfetch.json` only.
 
 #### Scenario: Generate fastfetch JSON during audit
 - **WHEN** the audit command is run
@@ -32,23 +32,13 @@ The audit system SHALL generate system information in JSON format for structured
 - **THEN** the system SHALL search the `packages` field in `fastfetch.json` for `nix-` pattern using jq
 - **AND** SHALL NOT rely on text-based grep parsing
 
-### Requirement: Backward Compatibility for Legacy Formats
-The check-output command SHALL support reading legacy audit outputs containing `neofetch.json`, `neofetch.txt`, or `fastfetch.txt` files.
+#### Scenario: System information file missing
+- **WHEN** check-output runs against a directory with no `fastfetch.json`
+- **THEN** it SHALL exit with an error naming the missing file and the command that produces it
+- **AND** SHALL NOT fall back to another format
 
-#### Scenario: Fallback to neofetch.json for old audits
-- **WHEN** check-output processes an existing audit archive
-- **AND** `fastfetch.json` is not present
-- **AND** `neofetch.json` exists
-- **THEN** the system SHALL parse `neofetch.json` using jq JSON queries
-- **AND** SHALL extract the same data fields as `fastfetch.json` would provide
+#### Scenario: Legacy format present without fastfetch.json
+- **WHEN** a directory contains `neofetch.json`, `neofetch.txt` or `fastfetch.txt` but no `fastfetch.json`
+- **THEN** the directory SHALL be treated as missing system information
+- **AND** SHALL NOT be parsed as a fallback
 
-#### Scenario: Fallback to text formats for older audits
-- **WHEN** neither `fastfetch.json` nor `neofetch.json` is present
-- **AND** `neofetch.txt` or `fastfetch.txt` exists
-- **THEN** the system SHALL parse the text file using grep/sed
-- **AND** SHALL extract OS and kernel fields at minimum
-
-#### Scenario: Prefer fastfetch.json when multiple formats exist
-- **WHEN** both `fastfetch.json` and `neofetch.json` exist in an audit directory
-- **THEN** the system SHALL use `fastfetch.json` as the primary source
-- **AND** SHALL ignore legacy files

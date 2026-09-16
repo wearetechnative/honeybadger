@@ -33,7 +33,8 @@ as `asset-inventory.txt`, into both the output directory and the tar archive.
 
 ### Requirement: Schema version
 
-The file SHALL carry a `schema_version` identifying its generation.
+The file SHALL carry a `schema_version` identifying its generation, and it SHALL
+be incremented when the shape of the document changes.
 
 #### Scenario: Version present
 - **WHEN** `asset-inventory.json` is written
@@ -43,6 +44,10 @@ The file SHALL carry a `schema_version` identifying its generation.
 - **WHEN** a consumer reads a `schema_version` it does not know
 - **THEN** it can identify the generation without inferring it from which keys
   are present
+
+#### Scenario: A new field is a new generation
+- **WHEN** a field is added to the document
+- **THEN** `schema_version` is greater than the generation that lacked it
 
 ### Requirement: Identity block
 
@@ -81,3 +86,70 @@ derived from.
 - **WHEN** a consumer reads the file
 - **THEN** a null value with a finding is distinguishable from a key this
   generation of the client does not emit at all
+
+### Requirement: Identity username agrees with the human-readable inventory
+
+`identity.username` SHALL be the same determination `asset-inventory.txt`
+records as the owner, so that the collection server and an operator reading the
+archive see the same person.
+
+#### Scenario: The two files agree
+- **WHEN** one audit run produces `asset-inventory.txt` and
+  `asset-inventory.json`
+- **THEN** `identity.username` equals the `Owner / User` value in
+  `asset-inventory.txt`
+
+#### Scenario: Agreement holds for a hyphenated hostname
+- **WHEN** the audited machine's hostname contains a hyphen
+- **THEN** the two files still agree, and both name a user that exists on the
+  machine
+
+#### Scenario: Username is not derived from the output directory name
+- **WHEN** `asset-inventory.json` is written
+- **THEN** `identity.username` is not recovered by parsing the output
+  directory's name, unless no recorded source is present in the archive
+
+### Requirement: Vulnerable package count
+
+The `vulnerable_packages` finding SHALL carry the number of vulnerable packages
+the audit counted, as a `count` field separate from the spreadsheet cell value.
+
+#### Scenario: Count recorded when packages were found
+- **WHEN** the audit counted one vulnerable package
+- **THEN** `findings.vulnerable_packages.count` is `1`
+- **AND** the finding text is retained
+
+#### Scenario: Count is a number, not a string
+- **WHEN** `count` carries a measured value
+- **THEN** it is a JSON number
+
+#### Scenario: Determined zero
+- **WHEN** a package audit tool is present and no vulnerable packages were found
+- **THEN** `count` is `0`
+
+#### Scenario: Nothing looked is not zero
+- **WHEN** no package audit tool is present, which Lynis reports with a
+  vulnerable package count of zero
+- **THEN** `count` is null rather than `0`
+
+#### Scenario: No audit data at all
+- **WHEN** `lynis-report.json` is unavailable
+- **THEN** `count` is null
+
+#### Scenario: Determined count distinguishable from an undetermined one
+- **WHEN** a consumer reads two documents, one from a machine where the count
+  was determined and one from a machine where it could not be
+- **THEN** the two are distinguishable without reading the finding text
+
+### Requirement: Spreadsheet cell stays undecided
+
+`vulnerable_packages.value` SHALL remain null, because the asset register
+contradicts itself about which literal means compliant.
+
+#### Scenario: Value is null even when a count is carried
+- **WHEN** the audit counted one vulnerable package
+- **THEN** `value` is null and `count` is `1`
+
+#### Scenario: Column J is still left to the operator
+- **WHEN** the xlsx report renders column J
+- **THEN** it reports the finding and gives no cell value

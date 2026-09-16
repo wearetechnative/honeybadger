@@ -163,6 +163,103 @@
   - All remaining packages are `Architecture: all` or have arm64 builds
   - Verified by building for `linux/arm64` and confirming the resulting image produces byte-identical JSON to the amd64 build
 - **Spec files unreadable by OpenSpec tooling** - Four capability specs (`dependency-validation`, `hardeningkitty-integration`, `windows-compliance-reporting`, `windows-security-data-collection`) had been archived with their `## ADDED Requirements` delta headers intact and no `## Requirements` section, making every requirement in them invisible to `openspec validate`, `list` and `archive`
+- **Hostname resolution without `hostname(1)`** - The audit named its output
+  directory and tar archive with `local hostname=$(hostname -s)`. `hostname(1)`
+  ships in `inetutils` and is not part of Arch's base install, so on a stock
+  Arch host the command was not found
+  - The failure was silent: `local` is a builtin that always returns 0, so the
+    assignment's exit status was the declaration's rather than the command's.
+    `set -e` never fired, nothing was printed, and the run wrote
+    `output--<user>-<date>` and `honeybadger--<user>-<date>.tar.gz` with an
+    empty hostname in the name
+  - The hostname is now resolved from `uname -n`, then `$HOSTNAME`, then
+    `/etc/hostname` - none of which needs a package on any supported platform.
+    The domain is cut off in the shell with `${name%%.*}` instead of by
+    `hostname -s`
+  - A value that cannot name a file (empty, whitespace, control characters, a
+    `/`) falls through to the next source, and when no source answers the audit
+    stops with an error naming all three rather than producing output without a
+    hostname
+  - `unpack_tarball` had the same masking on its `tar` listing; declaration and
+    assignment are now separate there too, and a test fails the suite if any
+    `local x=$(cmd)` is reintroduced into `RUNME.sh`
+- **Wrong username in `asset-inventory.json` for hyphenated hostnames** - Three
+  report generators recovered the username and the date by parsing them back out
+  of the output directory's name with `output-([^-]+)-([^-]+)-(.+)$`
+  - `[^-]+` cannot span a hyphen, so a hyphenated hostname shifted every group.
+    `output-hb-ubuntu-test-hbtest-16-09-2026` yielded `ubuntu`;
+    `output-pankhuri-prakash-IdeaPad-5-14ARE05-root-02-04-2026` yielded
+    `prakash`; `output-mbp-van-pim-pim-07-04-2026` yielded `van`. Two of the
+    eight real directory names we hold came out right
+  - `asset-inventory.txt` took the owner from the audit data and was correct, so
+    the two files disagreed - despite the emitter's comment saying they could
+    not. `asset-inventory.json` is what the collection server reads, so the
+    wrong value won
+  - The username now comes from the audit data for every consumer.
+    `RUNME.sh` already runs `fastfetch` as the invoking user for exactly this
+    purpose, so `fastfetch.json`'s `.user` is the value the directory name was
+    built from, recorded before the encoding lost it. `neofetch.json` and
+    `neofetch.txt` are read for older archives
+  - Where the directory name still has to be parsed - an archive with no fetch
+    file - it is anchored on the `DD-MM-YYYY` suffix from the right, which is
+    correct for every real name we hold
+  - `asset-inventory.txt` and `asset-inventory.json` now call the same resolver,
+    so they agree by construction rather than by comment
+  - Report filenames are corrected on affected hosts:
+    `honeybadger-van-pim-pim-07-04-2026-actions.md` becomes
+    `honeybadger-pim-07-04-2026-actions.md`. Hosts that were already right keep
+    the names they had
+  - `identity.hostname` was never affected: it comes from `lynis-report.json`
+- **Vulnerable package count discarded** - `vulnerable_packages.value` in
+  `asset-inventory.json` was always `null`, even when the audit had counted
+  vulnerable packages. The count survived only in the Dutch finding text, where
+  nothing could read it
+  - The emitter hardcoded an empty cell for this one finding, deliberately: the
+    asset register contradicts itself about which literal in column J means
+    compliant, so honeybadger asserts neither. That reasoning holds for the
+    spreadsheet cell and not for the count, which is a question the audit had
+    already answered
+  - The `null` was ambiguous in a way that mattered: on Arch it meant "no
+    package audit tool present, nothing determined" and on Ubuntu it meant
+    "one found, then thrown away" - the same serialised value, told apart only
+    by parsing prose
+  - `vulnerable_packages` now carries `count` beside its null `value`. `count`
+    is `0` only when a tool looked and found nothing; where no tool is present
+    Lynis also reports zero, but that means nothing looked, so `count` is null
+  - `_inventory_finding` rendered every extra field as a string, which would
+    have made the count `"1"`. The cell's rendering rule is now shared by both:
+    empty is null, a whole number is a number, anything else a string.
+    `tool: "lynis"` is unaffected
+  - A non-canonical integer such as `007` is carried as a string rather than as
+    a number, because `jq` reads it as `7` and would change the value without
+    saying so
+  - `schema_version` is now `2`. A document carrying `count` is a generation a
+    version-1 consumer does not fully understand, which is what the field is for
+- **Retired system information formats no longer read** - The client stopped
+  producing `neofetch.json`, `neofetch.txt` and `fastfetch.txt`, and the
+  collection server accepts only `fastfetch.json`, but the reading path still
+  fell back to all three - labelling that path "Legacy neofetch.json used - no
+  live data" itself
+  - The legacy path carried no `kernel_latest`, so a directory that took it
+    produced a report whose kernel comparison was silently absent
+  - System information now comes from `fastfetch.json` only. A directory without
+    it stops the run with an error naming the file, the command that produces it,
+    and any retired format found beside it - so a directory plainly holding
+    system information is not simply called empty
+  - The refusal happens before anything is fetched or written, so a directory the
+    client will not analyse is left exactly as it was found
+  - `lib/check-os-status.sh` is a standalone duplicate that `RUNME.sh` never
+    calls; the live path is `extract_os_info()` and `check_os_status()` in
+    `lib/_library`, which carried the same fallback chain. Both were fixed -
+    changing only the script would have left the behaviour unchanged
+  - With the directory refused at the door, the remaining legacy branches in
+    asset inventory, Nix detection, NixOS detection, the xlsx report and the
+    username resolver became unreachable and were removed rather than left as
+    dead code that still reads as support
+  - Verified by regenerating every artifact from a real output directory before
+    and after: all byte-identical
+  - Archives produced before the fastfetch migration stay readable; it is only
+    re-analysis that no longer accepts them
 
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 

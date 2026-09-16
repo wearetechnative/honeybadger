@@ -11,7 +11,7 @@ Make your computer as tough as a honeybadger. And that is tough. Check this vide
 Install the required dependencies:
 
 - **Lynis**: Security auditing tool (required)
-- **fastfetch**: System information display (required)
+- **fastfetch**: System information display (required, and not in every archive - see [Installing fastfetch](#installing-fastfetch))
 - **python3**: Runs the Lynis report converter (required)
 - **jq**: JSON processor (required)
 - **curl**: HTTP client for API calls (required)
@@ -23,6 +23,12 @@ Install the required dependencies:
 check. The serial is read from the kernel first, which works on every
 distribution without installing anything. See
 [Hardware serial number](#hardware-serial-number).
+
+**Note:** no hostname tool is required either. `hostname(1)` lives in
+`inetutils` and is not part of Arch's base install, so the audit resolves the
+machine's name from `uname -n`, then `$HOSTNAME`, then `/etc/hostname`. If none
+of the three yields a usable name the audit stops rather than writing output
+whose name has an empty hostname in it.
 
 #### Installing Lynis
 
@@ -54,6 +60,80 @@ sudo ./lynis audit system
 ```
 
 To ensure you have the latest version, check https://github.com/CISOfy/lynis for updates.
+
+#### Installing fastfetch
+
+Unlike Lynis, fastfetch is not in every archive. Check the table before
+reaching for your package manager - on Ubuntu 24.04 LTS `apt install fastfetch`
+fails because the package is simply not there, not because you mistyped it.
+
+| Distribution        | fastfetch                                    |
+|---------------------|----------------------------------------------|
+| Arch Linux          | `extra`                                      |
+| Debian 13 (trixie)  | in the archive                               |
+| Ubuntu 24.04 LTS    | **absent** - use the upstream `.deb` below   |
+| Ubuntu 25.04+       | in the archive                               |
+| Fedora              | in the archive                               |
+| macOS               | Homebrew                                     |
+
+**Arch Linux:**
+```bash
+sudo pacman -S fastfetch
+```
+
+**Debian 13+ / Ubuntu 25.04+:**
+```bash
+sudo apt install fastfetch
+```
+
+**Ubuntu 24.04 LTS and older:**
+```bash
+# Not in the archive. Take the release build from upstream.
+curl -LO https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb
+sudo dpkg -i fastfetch-linux-amd64.deb
+```
+Use `fastfetch-linux-aarch64.deb` on ARM. The `-polyfilled` variants of both
+exist for older glibc; try the plain one first.
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install fastfetch
+```
+An upstream `fastfetch-linux-amd64.rpm` is published alongside the `.deb` if
+your release does not carry the package.
+
+**macOS (via Homebrew):**
+```bash
+brew install fastfetch
+```
+
+#### Installing the remaining dependencies
+
+`jq`, `curl` and `python3` are in every distribution's archive under those
+names, with one exception worth knowing:
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install jq curl python3
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install jq curl python3
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S jq curl python
+```
+On Arch the package is `python`, not `python3` - `pacman -S python3` fails
+outright. It still provides `/usr/bin/python3`, which is the command the audit
+looks for.
+
+**macOS (via Homebrew):**
+```bash
+brew install jq curl python3
+```
 
 ## Usage on Linux and macOS
 
@@ -164,6 +244,15 @@ The xlsx report lists, per spreadsheet column, the cell value to enter and the a
 was derived from. It also marks the columns you maintain yourself (asset ID, owner, proof file,
 remarks) and the two columns that contain formulas and must not be overwritten. Honeybadger never
 reads from or writes to the spreadsheet - updating the register stays a manual step.
+
+`check-output` needs `fastfetch.json` in the directory it analyses. That is the only system
+information format honeybadger reads, and the only one the collection server accepts. A directory
+without it stops the run with an error naming the file, rather than producing a report whose
+kernel comparison is quietly missing.
+
+Directories produced before the fastfetch migration carry `neofetch.json`, `neofetch.txt` or
+`fastfetch.txt` instead. They predate the 2026-03 audit round: the archives stay readable, but
+re-analysing one needs an audit from a current client.
 
 ## ISO27001 Compliance Requirements
 
@@ -318,6 +407,7 @@ A value the audit could not determine, or deliberately declines to assert, is
 ```json
 "vulnerable_packages": {
   "value": null,
+  "count": null,
   "finding": "niet vastgesteld - geen package audit tool aanwezig"
 }
 ```
@@ -325,6 +415,23 @@ A value the audit could not determine, or deliberately declines to assert, is
 That is not the same as an absent key. `null` means "not determined, and here
 is why"; an absent key means this generation of the client does not report it at
 all. `schema_version` is how a consumer tells generations apart.
+
+Declining to fill in a cell never costs a measurement. Column J of the asset
+register contradicts itself about which literal means compliant - its data
+validation says `None`, its Status formula counts `Yes` - so `value` stays
+`null` and the count travels beside it:
+
+```json
+"vulnerable_packages": {
+  "value": null,
+  "count": 1,
+  "finding": "1 kwetsbare packages gevonden"
+}
+```
+
+`count` is `0` only when a package audit tool looked and found nothing. Where no
+tool is present Lynis also reports zero, but that means nothing looked, so
+`count` is `null`.
 
 ### Server Configuration
 
