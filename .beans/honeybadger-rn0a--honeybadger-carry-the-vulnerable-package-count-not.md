@@ -1,14 +1,14 @@
 ---
 # honeybadger-rn0a
 title: 'honeybadger: carry the vulnerable package count, not just the finding text'
-status: todo
+status: completed
 type: task
 priority: normal
 tags:
     - honeybadger
     - iso27001
 created_at: 2026-09-16T09:26:34Z
-updated_at: 2026-09-16T09:26:34Z
+updated_at: 2026-09-16T12:12:17Z
 ---
 
 `vulnerable_packages.value` in `asset-inventory.json` is always `null`, even
@@ -88,3 +88,81 @@ in both cases. A consumer reading `inventory` cannot tell "not determined" from
 
 This is no longer only a client-side loss: badgersbay reads `inventory` from
 `badgersbay-ucgi` onwards. Fix this before anything starts trusting the field.
+
+## Summary of Changes
+
+Fixed in OpenSpec change `carry-vulnerable-package-count`, archived as
+`openspec/changes/archive/2026-09-16-carry-vulnerable-package-count`.
+
+### The count travels beside the cell
+
+`value` stays `null` for the reason it always was - the register's data
+validation says `None` and its Status formula counts `Yes`, so honeybadger
+asserts neither. `count` is the measurement:
+
+    "vulnerable_packages": {
+      "value": null,
+      "count": 1,
+      "finding": "1 kwetsbare packages gevonden"
+    }
+
+`count` is `0` only when a package audit tool looked and found nothing. Where
+no tool is present Lynis also reports zero, but that means nothing looked - the
+condition it raises as PKGS-7398 - so `count` is null there. Reporting it as
+zero would be the worse bug: a fleet that never looked, filed as clean.
+
+### Typed extras
+
+`_inventory_finding` rendered every extra with `--arg`, so the count would have
+arrived as `"1"` - a number inside a string, which the consumer then has to
+parse and can parse wrongly. The cell's own rendering rule is factored into
+`_inventory_scalar()` and applied to both: empty is null, a whole number is a
+number, anything else a string. `tool: "lynis"` is unaffected.
+
+A non-canonical integer such as `007` is now carried as a string. `jq` reads it
+as `7` and would have changed the value without saying so.
+
+### Schema version
+
+Bumped to 2. The capability's design says the field exists so a consumer can
+recognise a generation rather than guessing from which keys are present; a
+document carrying `count` is such a generation. The same paragraph says
+consumers retain the whole document and must tolerate a version they do not
+fully understand, so the contract was already written for this - but it is the
+first bump, so it is worth badgersbay confirming it does not reject an
+unrecognised version.
+
+### The ambiguity is gone
+
+The two platforms from the bug report, through the real `check-output` path:
+
+    Arch    (no audit tool)  value=null  count=null
+    Ubuntu  (one found)      value=null  count=1
+
+Previously both serialised identically and could only be told apart by parsing
+the Dutch finding text.
+
+### Scope check
+
+All seven findings were read. `vulnerable_packages` is the only one passing an
+empty cell; `os`, `disk_encryption`, `screen_lock`, `firewall`,
+`hardening_score` and `os_uptodate` each pass a value the sheet accepts or
+`N.A.`. There is no second instance of a measurement discarded to avoid a
+spreadsheet ambiguity, so the split stays specific to column J. Recorded in
+`design.md`.
+
+### Not done, deliberately
+
+A machine-readable reason for *why* a count is null - no report versus no tool.
+Both remain distinguishable only by the finding text. Nothing has asked to
+branch on it, and `count` removes the ambiguity this bean was about. Noted in
+`design.md` as considered and declined.
+
+### Tests
+
+`tests/test_asset_inventory_json.sh` grows from 21 to 51 assertions: scalar
+rendering including the padded-integer case, a numeric extra versus a textual
+one, count present, determined zero, no audit tool, no report, and four
+end-to-end tests that run `generate_xlsx_asset_row_report` over fixture output
+directories for both platform cases. Full suite: 9 files, passing. shellcheck
+over `lib/_library`: unchanged from the previous commit.

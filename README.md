@@ -324,6 +324,7 @@ A value the audit could not determine, or deliberately declines to assert, is
 ```json
 "vulnerable_packages": {
   "value": null,
+  "count": null,
   "finding": "niet vastgesteld - geen package audit tool aanwezig"
 }
 ```
@@ -331,6 +332,23 @@ A value the audit could not determine, or deliberately declines to assert, is
 That is not the same as an absent key. `null` means "not determined, and here
 is why"; an absent key means this generation of the client does not report it at
 all. `schema_version` is how a consumer tells generations apart.
+
+Declining to fill in a cell never costs a measurement. Column J of the asset
+register contradicts itself about which literal means compliant - its data
+validation says `None`, its Status formula counts `Yes` - so `value` stays
+`null` and the count travels beside it:
+
+```json
+"vulnerable_packages": {
+  "value": null,
+  "count": 1,
+  "finding": "1 kwetsbare packages gevonden"
+}
+```
+
+`count` is `0` only when a package audit tool looked and found nothing. Where no
+tool is present Lynis also reports zero, but that means nothing looked, so
+`count` is `null`.
 
 ### Server Configuration
 

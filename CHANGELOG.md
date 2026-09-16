@@ -210,6 +210,31 @@
     `honeybadger-pim-07-04-2026-actions.md`. Hosts that were already right keep
     the names they had
   - `identity.hostname` was never affected: it comes from `lynis-report.json`
+- **Vulnerable package count discarded** - `vulnerable_packages.value` in
+  `asset-inventory.json` was always `null`, even when the audit had counted
+  vulnerable packages. The count survived only in the Dutch finding text, where
+  nothing could read it
+  - The emitter hardcoded an empty cell for this one finding, deliberately: the
+    asset register contradicts itself about which literal in column J means
+    compliant, so honeybadger asserts neither. That reasoning holds for the
+    spreadsheet cell and not for the count, which is a question the audit had
+    already answered
+  - The `null` was ambiguous in a way that mattered: on Arch it meant "no
+    package audit tool present, nothing determined" and on Ubuntu it meant
+    "one found, then thrown away" - the same serialised value, told apart only
+    by parsing prose
+  - `vulnerable_packages` now carries `count` beside its null `value`. `count`
+    is `0` only when a tool looked and found nothing; where no tool is present
+    Lynis also reports zero, but that means nothing looked, so `count` is null
+  - `_inventory_finding` rendered every extra field as a string, which would
+    have made the count `"1"`. The cell's rendering rule is now shared by both:
+    empty is null, a whole number is a number, anything else a string.
+    `tool: "lynis"` is unaffected
+  - A non-canonical integer such as `007` is carried as a string rather than as
+    a number, because `jq` reads it as `7` and would change the value without
+    saying so
+  - `schema_version` is now `2`. A document carrying `count` is a generation a
+    version-1 consumer does not fully understand, which is what the field is for
 
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 
