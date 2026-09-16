@@ -183,6 +183,33 @@
   - `unpack_tarball` had the same masking on its `tar` listing; declaration and
     assignment are now separate there too, and a test fails the suite if any
     `local x=$(cmd)` is reintroduced into `RUNME.sh`
+- **Wrong username in `asset-inventory.json` for hyphenated hostnames** - Three
+  report generators recovered the username and the date by parsing them back out
+  of the output directory's name with `output-([^-]+)-([^-]+)-(.+)$`
+  - `[^-]+` cannot span a hyphen, so a hyphenated hostname shifted every group.
+    `output-hb-ubuntu-test-hbtest-16-09-2026` yielded `ubuntu`;
+    `output-pankhuri-prakash-IdeaPad-5-14ARE05-root-02-04-2026` yielded
+    `prakash`; `output-mbp-van-pim-pim-07-04-2026` yielded `van`. Two of the
+    eight real directory names we hold came out right
+  - `asset-inventory.txt` took the owner from the audit data and was correct, so
+    the two files disagreed - despite the emitter's comment saying they could
+    not. `asset-inventory.json` is what the collection server reads, so the
+    wrong value won
+  - The username now comes from the audit data for every consumer.
+    `RUNME.sh` already runs `fastfetch` as the invoking user for exactly this
+    purpose, so `fastfetch.json`'s `.user` is the value the directory name was
+    built from, recorded before the encoding lost it. `neofetch.json` and
+    `neofetch.txt` are read for older archives
+  - Where the directory name still has to be parsed - an archive with no fetch
+    file - it is anchored on the `DD-MM-YYYY` suffix from the right, which is
+    correct for every real name we hold
+  - `asset-inventory.txt` and `asset-inventory.json` now call the same resolver,
+    so they agree by construction rather than by comment
+  - Report filenames are corrected on affected hosts:
+    `honeybadger-van-pim-pim-07-04-2026-actions.md` becomes
+    `honeybadger-pim-07-04-2026-actions.md`. Hosts that were already right keep
+    the names they had
+  - `identity.hostname` was never affected: it comes from `lynis-report.json`
 
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 

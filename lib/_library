@@ -1233,6 +1233,126 @@ read_recorded_serial() {
 }
 
 # ==============================================================================
+# AUDIT IDENTITY RESOLUTION
+# ==============================================================================
+#
+# Who ran the audit, and when. Both used to be recovered by parsing them back
+# out of the output directory's name, which is a lossy encoding: it joins
+# hostname, username and date with "-" and lets all three contain "-". The old
+# pattern - output-([^-]+)-([^-]+)-(.+)$ - could not span a hyphen, so every
+# hyphenated hostname shifted the fields and named a user that does not exist
+# on the machine.
+#
+# The username is not decoded any more. RUNME.sh runs fastfetch as the invoking
+# user for exactly this purpose, so fastfetch.json's .user is the value the
+# directory name was built from, recorded before the encoding lost it.
+
+# Parse an audit output directory name into its three fields.
+#
+# Anchored on the DD-MM-YYYY suffix and taking the last hyphen-free segment
+# before it as the username, which leaves the whole remainder as the hostname.
+# That is correct for every real directory name we hold, including
+# output-pankhuri-prakash-IdeaPad-5-14ARE05-root-02-04-2026. It is still wrong
+# for a username containing a hyphen, which is why this is the last resort
+# rather than the answer.
+#
+# Usage: hb_parse_output_dirname <dirname>
+# Sets: HB_DIR_HOSTNAME / HB_DIR_USERNAME / HB_DIR_DATE
+# Returns: 0 when the name parsed, 1 otherwise (all three left empty)
+hb_parse_output_dirname() {
+    local name="$1"
+
+    HB_DIR_HOSTNAME=""
+    HB_DIR_USERNAME=""
+    HB_DIR_DATE=""
+
+    if [[ "$name" =~ ^output-(.+)-([^-]+)-([0-9]{2}-[0-9]{2}-[0-9]{4})$ ]]; then
+        # shellcheck disable=SC2034  # part of this function's contract; read by callers
+        HB_DIR_HOSTNAME="${BASH_REMATCH[1]}"
+        HB_DIR_USERNAME="${BASH_REMATCH[2]}"
+        HB_DIR_DATE="${BASH_REMATCH[3]}"
+        return 0
+    fi
+
+    return 1
+}
+
+# Print the username the audit recorded, on stdout.
+#
+# Order, each consulted only when the previous produced nothing:
+#
+#   1. fastfetch.json .user   what the audit recorded, run as the real user
+#   2. neofetch.json .user    the same field, archives from before the switch
+#   3. neofetch.txt user@host the same value, from before either was JSON
+#   4. the directory name     archives carrying none of the above
+#
+# Returns 1 and prints nothing when no source answers, so the caller decides
+# what an unknown user means instead of being handed a plausible default.
+#
+# Usage: hb_audit_username <output_dir>
+hb_audit_username() {
+    local output_dir="$1"
+    local candidate=""
+    local fetch_json=""
+
+    if [[ -f "$output_dir/fastfetch.json" ]]; then
+        fetch_json="$output_dir/fastfetch.json"
+    elif [[ -f "$output_dir/neofetch.json" ]]; then
+        fetch_json="$output_dir/neofetch.json"
+    fi
+
+    if [[ -n "$fetch_json" ]] && command -v jq >/dev/null 2>&1; then
+        candidate=$(jq -r '.user // empty' "$fetch_json" 2>/dev/null)
+        if [[ -n "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    fi
+
+    if [[ -f "$output_dir/neofetch.txt" ]]; then
+        candidate=$(grep -m1 '^[A-Za-z0-9_.-]*@' "$output_dir/neofetch.txt" 2>/dev/null | cut -d'@' -f1)
+        if [[ -n "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    fi
+
+    if hb_parse_output_dirname "$(basename "$output_dir")"; then
+        if [[ -n "$HB_DIR_USERNAME" ]]; then
+            printf '%s' "$HB_DIR_USERNAME"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Print the filename a report of the given kind should be written to.
+#
+# honeybadger-{user}-{date}-{kind}.md when both are known. When they are not,
+# the run cannot be named after a person, so it is named after the kind and
+# today's date rather than after a user we would be inventing.
+#
+# Usage: hb_report_basename <output_dir> <kind>
+hb_report_basename() {
+    local output_dir="$1" kind="$2"
+    local username=""
+
+    username=$(hb_audit_username "$output_dir") || username=""
+
+    # hb_audit_username() leaves HB_DIR_DATE set only when it fell through to
+    # the directory name, so parse explicitly rather than relying on that.
+    hb_parse_output_dirname "$(basename "$output_dir")" || true
+
+    if [[ -n "$username" && -n "$HB_DIR_DATE" ]]; then
+        printf 'honeybadger-%s-%s-%s.md' "$username" "$HB_DIR_DATE" "$kind"
+        return 0
+    fi
+
+    printf 'honeybadger-%s-%s.md' "$kind" "$(date +%d-%m-%Y)"
+}
+
+# ==============================================================================
 # ASSET INVENTORY FUNCTIONS
 # ==============================================================================
 
@@ -1260,7 +1380,10 @@ generate_asset_inventory() {
     local malware_scanner="Unknown"
     local firewall_active="Unknown"
     local os_uptodate="Unknown"
-    local owner=""
+    # Through the same resolver asset-inventory.json uses, so the two files
+    # agree by construction rather than by comment.
+    local owner
+    owner=$(hb_audit_username "$output_dir") || owner=""
     local report_date=""
     local hardening_score=""
     local hardening_status=""
@@ -1330,7 +1453,6 @@ generate_asset_inventory() {
 
     if [[ -n "$_hw_json" ]]; then
         # Extract from JSON
-        owner=$(jq -r '.user // empty' "$_hw_json" 2>/dev/null)
         model=$(jq -r '.host // empty' "$_hw_json" 2>/dev/null)
         kernel=$(jq -r '.kernel // empty' "$_hw_json" 2>/dev/null)
 
@@ -1341,7 +1463,6 @@ generate_asset_inventory() {
         fi
     elif [[ -f "$output_dir/neofetch.txt" ]]; then
         # Fallback to text parsing for backward compatibility
-        owner=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f1 | head -1)
         model=$(grep "^Host:" "$output_dir/neofetch.txt" | sed 's/^Host: //' | head -1)
         kernel=$(grep "^Kernel:" "$output_dir/neofetch.txt" | sed 's/^Kernel: //' | head -1)
 
@@ -2246,20 +2367,14 @@ generate_compliance_report() {
         return 1
     fi
 
-    # Extract username and date from output directory name
-    # Format: output-{hostname}-{user}-{date}
-    local dirname=$(basename "$output_dir")
-    local report_file=""
+    # Who ran the audit comes from what the audit recorded, not from the
+    # directory name: that name joins hostname, username and date with "-" and
+    # cannot be decoded when the hostname has one of its own.
+    local username
+    username=$(hb_audit_username "$output_dir") || username=""
 
-    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
-        local hostname="${BASH_REMATCH[1]}"
-        local username="${BASH_REMATCH[2]}"
-        local datepart="${BASH_REMATCH[3]}"
-        report_file="honeybadger-${username}-${datepart}-compliance.md"
-    else
-        # Fallback
-        report_file="honeybadger-compliance-$(date +%d-%m-%Y).md"
-    fi
+    local report_file
+    report_file=$(hb_report_basename "$output_dir" compliance)
 
     # Run compliance checks
     # Note: Capture exit code AFTER each function call, not on same line as local declaration
@@ -2508,18 +2623,8 @@ generate_lynis_actions_report() {
         return 1
     fi
 
-    # Extract username and date from output directory name
-    local dirname=$(basename "$output_dir")
-    local report_file=""
-
-    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
-        local hostname="${BASH_REMATCH[1]}"
-        local username="${BASH_REMATCH[2]}"
-        local datepart="${BASH_REMATCH[3]}"
-        report_file="honeybadger-${username}-${datepart}-actions.md"
-    else
-        report_file="honeybadger-actions-$(date +%d-%m-%Y).md"
-    fi
+    local report_file
+    report_file=$(hb_report_basename "$output_dir" actions)
 
     # Get metadata
     local hostname=$(jq -r '.hostname // "Unknown"' "$lynis_file" 2>/dev/null)
@@ -2800,7 +2905,7 @@ _write_asset_inventory_json() {
     jq -n \
         --argjson schema_version 1 \
         --arg generated_at "$(date -Iseconds)" \
-        --arg honeybadger_version "$(cat "$thisdir/VERSION-honeybadger" 2>/dev/null || echo unknown)" \
+        --arg honeybadger_version "$(cat "${thisdir:-.}/VERSION-honeybadger" 2>/dev/null || echo unknown)" \
         --arg platform "$platform" \
         --argjson serial "$serial_json" \
         --arg hostname "$hostname" \
@@ -2836,19 +2941,11 @@ generate_xlsx_asset_row_report() {
         return 1
     fi
 
-    # Extract username and date from output directory name
-    # Format: output-{hostname}-{user}-{date}
-    local dirname=$(basename "$output_dir")
-    local report_file=""
-    local username=""
+    local username
+    username=$(hb_audit_username "$output_dir") || username=""
 
-    if [[ "$dirname" =~ output-([^-]+)-([^-]+)-(.+)$ ]]; then
-        username="${BASH_REMATCH[2]}"
-        local datepart="${BASH_REMATCH[3]}"
-        report_file="honeybadger-${username}-${datepart}-xlsx.md"
-    else
-        report_file="honeybadger-xlsx-$(date +%d-%m-%Y).md"
-    fi
+    local report_file
+    report_file=$(hb_report_basename "$output_dir" xlsx)
 
     local lynis_file="$output_dir/lynis-report.json"
     local have_lynis=false
@@ -2904,6 +3001,9 @@ generate_xlsx_asset_row_report() {
     # --- C hint + E: Model --------------------------------------------------
     local model_cell="N.A."
     local model_src="fastfetch.json niet beschikbaar"
+    # Already the audit's own determination. This used to start from the
+    # directory name and be corrected from fastfetch a few lines down;
+    # hb_audit_username() reads that same field, so there is one source.
     local scan_user="$username"
 
     local hw_json=""
@@ -2921,8 +3021,6 @@ generate_xlsx_asset_row_report() {
         else
             model_src="host ontbreekt in $(basename "$hw_json")"
         fi
-        local user_raw=$(jq -r '.user // ""' "$hw_json" 2>/dev/null)
-        [[ -n "$user_raw" ]] && scan_user="$user_raw"
     else
         unavailable+=("fastfetch.json - model")
     fi
