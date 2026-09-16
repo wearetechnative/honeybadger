@@ -37,11 +37,11 @@
 - **THEN** SHALL de functie `unknown` retourneren via stdout
 - **AND** SHALL de kernelstatus het eindsysteem-oordeel niet negatief beïnvloeden
 
-### Requirement: check_os_status combineert OS- en kernelstatus
-`check_os_status()` SHALL de returnwaarde van `analyze_kernel_status()` opvangen en doorgeven aan `generate_status_summary()`.
+### Requirement: De statusrapportgenerator combineert OS- en kernelstatus
+`generate_os_status_report()` SHALL de returnwaarde van `analyze_kernel_status()` opvangen en doorgeven aan `generate_status_summary()`.
 
 #### Scenario: Kernelstatus wordt doorgegeven aan samenvatting
-- **WHEN** `check_os_status()` wordt aangeroepen
+- **WHEN** `generate_os_status_report()` wordt aangeroepen
 - **AND** `analyze_kernel_status()` retourneert een statuswaarde
 - **THEN** SHALL die waarde als `kernel_status_result` worden opgeslagen
 - **AND** SHALL `generate_status_summary()` worden aangeroepen met zowel `os_status_result` als `kernel_status_result`
