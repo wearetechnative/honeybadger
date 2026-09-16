@@ -161,49 +161,10 @@ test_json_error_body_is_shown_as_is() {
 
 # ------------------------------------------------------------- what is sent
 
-test_system_information_is_submitted_as_fastfetch() {
-    setup_submission_env
-    local dir
-    dir=$(make_output_dir)
-
-    local output status
-    output=$(submit_all_reports "$dir")
-    status=$?
-
-    local args
-    args=$(curl_args)
-    assert_success "submitting a complete output directory" "$status"
-    assert_contains "$args" "X-Report-Type: fastfetch" "system info goes out as fastfetch"
-    assert_contains "$args" "@$dir/fastfetch.json" "system info is read from fastfetch.json"
-    assert_contains "$output" "- fastfetch" "the summary names fastfetch"
-
-    if [[ "$args" == *"X-Report-Type: neofetch"* ]]; then
-        fail "the retired type neofetch was sent: the server rejects it with HTTP 400"
-    fi
-    ASSERTIONS=$((ASSERTIONS + 1))
-
-    teardown_submission_env
-}
-
-test_hardening_report_is_submitted_as_lynis() {
-    setup_submission_env
-    local dir
-    dir=$(make_output_dir)
-
-    submit_all_reports "$dir" > /dev/null
-    local args
-    args=$(curl_args)
-
-    assert_contains "$args" "X-Report-Type: lynis" "hardening report goes out as lynis"
-    assert_contains "$args" "@$dir/lynis-report.json" "hardening report is read from lynis-report.json"
-
-    teardown_submission_env
-}
-
-test_both_paths_agree_on_the_report_file_names() {
-    # The tar path never names a report type: the server derives it from the
-    # file name inside the archive. So the names the per-report path submits
-    # have to be the names the audit writes into the tarball.
+test_the_archive_carries_the_files_the_server_derives_types_from() {
+    # The submission never names a report type: the server derives it from the
+    # file name inside the archive. So the names the audit writes have to be
+    # the names the server recognises.
     setup_submission_env
     local dir
     dir=$(make_output_dir)
@@ -214,84 +175,13 @@ test_both_paths_agree_on_the_report_file_names() {
     local members
     members=$(tar tzf "$tarball")
 
-    assert_contains "$members" "$HB_SYSINFO_REPORT_FILE" "the archive carries the system info file the per-report path submits"
-    assert_contains "$members" "$HB_HARDENING_REPORT_FILE" "the archive carries the hardening file the per-report path submits"
-
-    teardown_submission_env
-}
-
-test_authentication_and_identity_headers_are_sent() {
-    setup_submission_env
-    local dir
-    dir=$(make_output_dir)
-
-    submit_all_reports "$dir" > /dev/null
-    local args
-    args=$(curl_args)
-
-    assert_contains "$args" "Authorization: Bearer test-token" "the bearer token is sent"
-    assert_contains "$args" "X-Hostname: " "the hostname is sent"
-    assert_contains "$args" "X-Username: " "the username is sent"
+    assert_contains "$members" "$HB_SYSINFO_REPORT_FILE" "the archive carries the system info file"
+    assert_contains "$members" "$HB_HARDENING_REPORT_FILE" "the archive carries the hardening file"
 
     teardown_submission_env
 }
 
 # ------------------------------------------------------ missing and rejected
-
-test_a_missing_report_file_is_a_failure_not_a_skip() {
-    setup_submission_env
-    local dir
-    dir=$(make_output_dir)
-    rm -f "$dir/fastfetch.json"
-
-    local output status
-    output=$(submit_all_reports "$dir")
-    status=$?
-
-    assert_failure "an output directory with no fastfetch.json" "$status"
-    assert_contains "$output" "fastfetch.json" "the missing file is named"
-    assert_contains "$output" "Failed: 1" "the missing report is counted as failed"
-
-    teardown_submission_env
-}
-
-test_a_rejected_report_makes_submit_exit_non_zero() {
-    setup_submission_env
-    local dir
-    dir=$(make_output_dir)
-
-    STUB_HTTP_CODE="400"
-    STUB_BODY="<html><body><p>Message: Invalid report type 'neofetch'.</p></body></html>"
-
-    local output status
-    output=$(submit_all_reports "$dir")
-    status=$?
-
-    assert_failure "every report rejected" "$status"
-    assert_contains "$output" "Invalid report type" "the server's reason reaches the operator"
-    assert_contains "$output" "not retrying" "a client error is not retried"
-
-    teardown_submission_env
-}
-
-test_a_partial_submission_counts_as_submitted() {
-    setup_submission_env
-    local dir
-    dir=$(make_output_dir)
-
-    STUB_HTTP_CODE="207"
-    STUB_BODY='{"status": "partial", "unmatched_reason": "serial_not_in_register"}'
-
-    local output status
-    output=$(submit_all_reports "$dir")
-    status=$?
-
-    assert_success "a 207 submission" "$status"
-    assert_contains "$output" "partial" "the partial result is named"
-    assert_contains "$output" "serial_not_in_register" "the server's remark reaches the operator"
-
-    teardown_submission_env
-}
 
 test_tar_submission_accepts_a_partial_answer() {
     setup_submission_env
@@ -335,6 +225,47 @@ test_tar_submission_reports_the_server_reason_on_rejection() {
     assert_contains "$output" "Invalid authentication token" "the server's reason reaches the operator"
 
     teardown_submission_env
+}
+
+test_submission_sends_authentication_and_identity_headers() {
+    setup_submission_env
+    local dir
+    dir=$(make_output_dir)
+    local tarball="$WORKDIR/honeybadger-testhost-tester-15-09-2026.tar.gz"
+    tar czf "$tarball" -C "$WORKDIR" "$(basename "$dir")" 2>/dev/null
+
+    submit_tar_file "$tarball" > /dev/null 2>&1
+    local args
+    args=$(curl_args)
+
+    assert_contains "$args" "Authorization: Bearer test-token" "the bearer token is sent"
+    assert_contains "$args" "X-Hostname: " "the hostname is sent"
+    assert_contains "$args" "X-Username: " "the username is sent"
+
+    teardown_submission_env
+}
+
+test_a_missing_archive_is_a_failure() {
+    setup_submission_env
+
+    local output status
+    output=$(submit_tar_file "$WORKDIR/does-not-exist.tar.gz" 2>&1)
+    status=$?
+
+    assert_failure "submitting an archive that is not there" "$status"
+    assert_contains "$output" "does-not-exist.tar.gz" "the missing file is named"
+
+    teardown_submission_env
+}
+
+test_the_single_report_path_is_gone() {
+    # It submitted to an endpoint with no concept of a hardware serial, so its
+    # submissions could not be attributed to an asset in the ISO register.
+    if declare -f submit_all_reports > /dev/null 2>&1; then
+        assert_failure "submit_all_reports should not exist" 0
+    else
+        assert_success "the per-report submission path is removed" 0
+    fi
 }
 
 run_tests "$@"

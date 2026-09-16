@@ -536,50 +536,8 @@ if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
 fi
 }
 
-make_command "submit" "Submit audit reports to honeybadger-server"
+make_command "submit" "Submit the audit archive to honeybadger-server"
 submit(){
- # Parse optional output directory parameter
- local output_dir="$1"
-
- # If no directory specified, find the most recent one
- if [[ -z "$output_dir" ]]; then
-   echo "No output directory specified, searching for most recent..."
-   output_dir=$(find_latest_output_dir)
-   if [[ $? -ne 0 ]]; then
-     echo "ERROR: Could not find any output-* directories"
-     echo ""
-     echo "Usage: ./RUNME.sh submit [output-directory]"
-     echo "Example: ./RUNME.sh submit output-hostname-user-17-03-2026"
-     echo ""
-     echo "Or run an audit first:"
-     echo "  sudo ./RUNME.sh audit"
-     exit 1
-   fi
-   echo "Found: $output_dir"
-   echo ""
- fi
-
- # Validate directory exists
- if [[ ! -d "$output_dir" ]]; then
-   echo "ERROR: Output directory does not exist: $output_dir"
-   echo ""
-   echo "Usage: ./RUNME.sh submit [output-directory]"
-   echo "Example: ./RUNME.sh submit output-hostname-user-17-03-2026"
-   echo ""
-   echo "Available directories:"
-   ls -dt output-* 2>/dev/null || echo "  (none found)"
-   exit 1
- fi
-
- # Submit all reports
- submit_all_reports "$output_dir"
- exit_code=$?
-
- exit $exit_code
-}
-
-make_command "submit-tar" "Submit tar archive to honeybadger-server"
-submit-tar(){
  # Parse optional tar file parameter
  local tar_file="$1"
 
@@ -590,8 +548,8 @@ submit-tar(){
    if [[ $? -ne 0 ]]; then
      echo "ERROR: No tar files found. Run audit first or specify a tar file."
      echo ""
-     echo "Usage: ./RUNME.sh submit-tar [tar-file]"
-     echo "Example: ./RUNME.sh submit-tar honeybadger-hostname-user-20-03-2026.tar.gz"
+     echo "Usage: ./RUNME.sh submit [tar-file]"
+     echo "Example: ./RUNME.sh submit honeybadger-hostname-user-20-03-2026.tar.gz"
      echo ""
      echo "Or run an audit first:"
      echo "  sudo ./RUNME.sh audit"
@@ -605,8 +563,8 @@ submit-tar(){
  if [[ ! -f "$tar_file" ]]; then
    echo "ERROR: File not found: $tar_file"
    echo ""
-   echo "Usage: ./RUNME.sh submit-tar [tar-file]"
-   echo "Example: ./RUNME.sh submit-tar honeybadger-hostname-user-20-03-2026.tar.gz"
+   echo "Usage: ./RUNME.sh submit [tar-file]"
+   echo "Example: ./RUNME.sh submit honeybadger-hostname-user-20-03-2026.tar.gz"
    echo ""
    echo "Available tar files:"
    ls -t honeybadger-*.tar.gz honeybadger-*.tar 2>/dev/null || echo "  (none found)"
@@ -664,6 +622,19 @@ submit-tar(){
 
  exit $exit_code
 }
+make_command "submit-tar" "Deprecated alias for submit"
+submit-tar(){
+ # The single-report path is gone: it submitted to an endpoint with no concept
+ # of a hardware serial, so its submissions could not be attributed to an asset.
+ # This alias exists so scheduled jobs still calling submit-tar keep working
+ # rather than failing in the way hardest to notice - a cron job printing an
+ # error nobody reads.
+ echo "WARNING: 'submit-tar' is deprecated and will be removed."
+ echo "         Use './RUNME.sh submit' instead - it does exactly this."
+ echo ""
+ submit "$@"
+}
+
 
 make_command "check-output" "Check OS and kernel status from existing output"
 check-output(){

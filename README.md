@@ -290,83 +290,35 @@ Send this file to your CISO or the person who requested the audit.
 
 ### Submitting Reports
 
-You can also submit reports directly to a centralized compliance server (see Server Report Submission section below).
-
-## Server Report Submission
-
-Honeybadger can optionally submit audit reports to a centralized honeybadger-server for compliance monitoring and tracking.
-
-### Configuration
-
-Create a configuration file at one of these locations (checked in order):
-1. `./.honeybadger.conf` (current directory)
-2. `~/.honeybadger.conf` (user home directory)
-3. `/etc/honeybadger.conf` (system-wide)
-
-Example configuration (see `.honeybadger.conf.example`):
+After running an audit, submit the archive:
 
 ```bash
-# Enable server submission
-SERVER_ENABLED=true
-
-# Server URL
-SERVER_URL=http://honeybadger-server:7123/
-
-# Bearer token for authentication (required)
-# Example: SERVER_TOKEN=hb_token_faa0c072984086bf2c32055cbbf40c2
-SERVER_TOKEN=hb_token_your_token_here
-
-# Connection timeout in seconds
-SERVER_TIMEOUT=30
-
-# Number of retry attempts on network failures
-SERVER_RETRY_COUNT=3
-
-# Dry-run mode: log what would be submitted without actual HTTP requests
-DRY_RUN=false
-```
-
-### Submitting Reports
-
-After running an audit, you can submit reports to the server in two ways:
-
-#### Submit Individual JSON Reports
-
-Submits `fastfetch.json` as report type `fastfetch` and `lynis-report.json` as
-report type `lynis`. A report the output directory does not contain counts as a
-failure, and `submit` exits non-zero if any report did not reach the server.
-
-```bash
-# Submit the most recent audit reports
+# Submit the most recent archive (auto-discovery)
 ./RUNME.sh submit
 
-# Submit reports from a specific directory
-./RUNME.sh submit output-hostname-user-17-03-2026
+# Submit a specific archive
+./RUNME.sh submit honeybadger-hostname-user-20-03-2026.tar.gz
 ```
 
-#### Submit Complete Tar Archive
+The archive goes to `SERVER_URL/submit-tar`. It carries `hardware-serial.txt`,
+which is how the server resolves which asset in the ISO register the submission
+belongs to. The submission names no report types of its own: the server derives
+them from the file names inside the archive.
 
-Submit the complete audit package as a single tar archive (simpler, single upload):
+The server answers HTTP 207 when it stored a submission but could not resolve
+it fully - most often because the hardware serial is not in the asset register.
+That counts as submitted; the server's remark is printed rather than the same
+evidence being resent.
 
-```bash
-# Submit the most recent tar archive (auto-discovery)
-./RUNME.sh submit-tar
+#### Why there is only one path
 
-# Submit a specific tar archive
-./RUNME.sh submit-tar honeybadger-hostname-user-20-03-2026.tar.gz
-```
+There used to be a second command that submitted reports one at a time to
+`SERVER_URL/`. That endpoint has no concept of a hardware serial, so its
+submissions could never be attributed to an asset: they landed under hostname
+and username with no evidence archive beside them. It has been removed.
 
-**Server Requirements:**
-- Individual JSON submission uses endpoint: `SERVER_URL/`
-- Tar archive submission uses endpoint: `SERVER_URL/submit-tar`
-- The tar path sends no report types of its own: the server derives them from
-  the file names inside the archive, which are the same names the individual
-  submission reads
-
-The server answers HTTP 207 when it stored a submission but could not resolve it
-fully - most often because the hardware serial is not in the asset register.
-Both submission paths treat that as submitted and print the server's remark
-rather than resending the same evidence.
+`submit-tar` still works as a deprecated alias, so scheduled jobs calling it do
+not fail, but it prints a warning and does exactly what `submit` does.
 
 **Note:** Report submission is completely separate from the audit command. The audit generates local reports only. You must explicitly run the submit command to send reports to the server.
 

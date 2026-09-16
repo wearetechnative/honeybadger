@@ -1,14 +1,31 @@
-# report-submission Specification
+## REMOVED Requirements
 
-## Purpose
-This specification defines how the Honeybadger client submits audit results to the collection server: what it sends, how the server learns what it received, and how the client reads the answer. There is one path. The archive carries the hardware serial, which is what lets the server attribute a submission to an asset in the ISO register, and the server derives each report type from the file names inside it.
+### Requirement: Report Type Naming
 
-## Requirements
+**Reason**: The client no longer names report types at all. Submission goes
+through the archive, and the server derives each type from the file name inside
+it. The requirement existed to keep two paths in step with one another; there is
+one path now.
 
+**Migration**: The file names the audit writes - `fastfetch.json` and
+`lynis-report.json` - are what the server matches on, and that is covered by
+"Submit audit results to the collection server" below.
 
+### Requirement: Missing Report Handling
+
+**Reason**: Both scenarios describe the per-report path: a missing
+`fastfetch.json` in an output directory, and a partial run where some reports
+reached the server and others did not. Neither can occur when the unit of
+submission is one archive.
+
+**Migration**: Replaced by "Missing Archive Handling" below, which covers the
+cases that do occur - no archive found, and a named archive that is not there.
+
+## MODIFIED Requirements
 
 ### Requirement: Submission Result Reporting
-The client SHALL report what the server said about a submission, so an operator can act on a rejection without reproducing it by hand.
+The client SHALL report what the server said about a submission, so an operator
+can act on a rejection without reproducing it by hand.
 
 #### Scenario: Server rejects a submission
 - **WHEN** the server answers with a 4xx status
@@ -24,6 +41,8 @@ The client SHALL report what the server said about a submission, so an operator 
 #### Scenario: Transient server or network failure
 - **WHEN** the server answers with a 5xx status or the request fails to complete
 - **THEN** the client SHALL retry with exponential backoff up to the configured attempt count
+
+## ADDED Requirements
 
 ### Requirement: Submit audit results to the collection server
 

@@ -1488,6 +1488,10 @@ find_latest_tar() {
 # type from the file name inside the archive - so the file names here are the
 # same ones the audit writes into the tarball, and a change to one is a change
 # to both.
+# File names the audit writes into the output directory, and the report types
+# the collection server derives from them. The server reads the type from the
+# member name inside the archive, so these two have to stay in step with what
+# the audit produces.
 HB_SYSINFO_REPORT_FILE="${HB_SYSINFO_REPORT_FILE:-fastfetch.json}"
 HB_SYSINFO_REPORT_TYPE="${HB_SYSINFO_REPORT_TYPE:-fastfetch}"
 HB_HARDENING_REPORT_FILE="${HB_HARDENING_REPORT_FILE:-lynis-report.json}"
@@ -1537,123 +1541,6 @@ report_server_response() {
     echo "  Server said: $body"
 }
 
-# Submit a single report to the server
-# Usage: submit_report <report_file> <report_type>
-submit_report() {
-    local report_file="$1"
-    local report_type="$2"
-
-    # A report that is not there was not submitted. Saying so is the point:
-    # counting it as a success hides an audit that never reached the server.
-    if [[ ! -f "$report_file" ]]; then
-        echo "✗ Cannot submit $report_type: file not found (${report_file:-<no file>})"
-        return 1
-    fi
-
-    # Auto-detect system identity
-    local hostname
-    hostname=$(hostname -s)
-    local username
-    username="${SUDO_USER:-$(whoami)}"
-
-    # Build curl command
-    local curl_cmd=(
-        curl
-        -X POST
-        "$SERVER_URL"
-        -H "Content-Type: application/json"
-        -H "X-Hostname: $hostname"
-        -H "X-Username: $username"
-        -H "X-Report-Type: $report_type"
-    )
-
-    # Add Authorization header if token is configured
-    if [[ -n "$SERVER_TOKEN" ]]; then
-        curl_cmd+=(-H "Authorization: Bearer $SERVER_TOKEN")
-    fi
-
-    # The server explains a rejection in the response body, so keep it: an
-    # operator seeing only "HTTP 400" has to reproduce the call by hand.
-    local body_file
-    body_file=$(mktemp "${TMPDIR:-/tmp}/honeybadger-submit-XXXXXX")
-
-    curl_cmd+=(
-        --max-time "$SERVER_TIMEOUT"
-        --silent
-        --show-error
-        --write-out "%{http_code}"
-        --output "$body_file"
-        --data-binary "@$report_file"
-    )
-
-    # Dry-run mode
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo "DRY-RUN: Would submit $report_type report"
-        echo "  File: $report_file"
-        echo "  Server: $SERVER_URL"
-        echo "  Headers: X-Hostname=$hostname, X-Username=$username, X-Report-Type=$report_type"
-        echo "  Command: ${curl_cmd[*]}"
-        rm -f "$body_file"
-        return 0
-    fi
-
-    # Retry logic with exponential backoff. One exit path, so the captured
-    # response body is always cleaned up.
-    local attempt=1
-    local max_attempts=$SERVER_RETRY_COUNT
-    local status=1
-
-    while [[ $attempt -le $max_attempts ]]; do
-        echo "Submitting $report_type report (attempt $attempt/$max_attempts)..."
-
-        local http_code
-        http_code=$("${curl_cmd[@]}" 2>&1)
-        local curl_exit=$?
-
-        local outcome
-        outcome=$(classify_submission_response "$http_code" "$curl_exit")
-
-        if [[ "$outcome" == "success" ]]; then
-            echo "✓ Successfully submitted $report_type report"
-            status=0
-            break
-        fi
-
-        if [[ "$outcome" == "partial" ]]; then
-            # Stored, but the server flagged something about it. Retrying
-            # would submit the same report a second time.
-            echo "✓ Submitted $report_type report (HTTP $http_code, partial - the server stored it with a remark)"
-            report_server_response "$body_file"
-            status=0
-            break
-        fi
-
-        if [[ "$outcome" == "client-error" ]]; then
-            echo "✗ Failed to submit $report_type: HTTP $http_code (client error, not retrying)"
-            report_server_response "$body_file"
-            status=1
-            break
-        fi
-
-        # Log failure and retry if attempts remaining
-        if [[ $attempt -lt $max_attempts ]]; then
-            local delay=$((2 ** (attempt - 1)))  # Exponential backoff: 1s, 2s, 4s
-            echo "  Failed (HTTP $http_code, curl exit $curl_exit), retrying in ${delay}s..."
-            sleep "$delay"
-        else
-            echo "✗ Failed to submit $report_type after $max_attempts attempts (HTTP $http_code, curl exit $curl_exit)"
-            report_server_response "$body_file"
-            status=1
-        fi
-
-        ((attempt++))
-    done
-
-    rm -f "$body_file"
-    return $status
-}
-
-# Submit tar file to server
 # Usage: submit_tar_file <tar_file_path>
 submit_tar_file() {
     local tar_file="$1"
@@ -1768,98 +1655,6 @@ submit_tar_file() {
     return $status
 }
 
-# Submit all available reports from output directory
-# Usage: submit_all_reports <output_dir>
-submit_all_reports() {
-    local output_dir="$1"
-
-    if [[ ! -d "$output_dir" ]]; then
-        echo "ERROR: Output directory does not exist: $output_dir" >&2
-        return 1
-    fi
-
-    echo "======================================"
-    echo "Submitting reports from: $output_dir"
-    echo "======================================"
-    echo ""
-
-    # Load configuration
-    load_server_config
-    echo ""
-
-    # Check if submission is enabled
-    if [[ "$SERVER_ENABLED" != "true" ]]; then
-        echo "Server submission is disabled (SERVER_ENABLED=false)"
-        echo "To enable, set SERVER_ENABLED=true in configuration file"
-        return 1
-    fi
-
-    # Check if token is configured
-    if [[ -z "$SERVER_TOKEN" ]]; then
-        echo "ERROR: SERVER_TOKEN is required but not configured"
-        echo ""
-        echo "The server requires authentication. Please add SERVER_TOKEN to your configuration file:"
-        echo "  SERVER_TOKEN=hb_token_your_token_here"
-        echo ""
-        echo "Configuration locations:"
-        echo "  - ./.honeybadger.conf (current directory)"
-        echo "  - ~/.honeybadger.conf (user home)"
-        echo "  - /etc/honeybadger.conf (system-wide)"
-        return 1
-    fi
-
-    # Track submission results
-    local success_count=0
-    local fail_count=0
-    local reports_submitted=()
-    local reports_failed=()
-
-    # Submit the system information report. The audit writes fastfetch.json and
-    # the server accepts the type "fastfetch"; the tar path arrives at the same
-    # type because the server reads it off that same file name in the archive.
-    if submit_report "$output_dir/$HB_SYSINFO_REPORT_FILE" "$HB_SYSINFO_REPORT_TYPE"; then
-        ((success_count++))
-        reports_submitted+=("$HB_SYSINFO_REPORT_TYPE")
-    else
-        ((fail_count++))
-        reports_failed+=("$HB_SYSINFO_REPORT_TYPE")
-    fi
-    echo ""
-
-    # Submit the hardening report
-    if submit_report "$output_dir/$HB_HARDENING_REPORT_FILE" "$HB_HARDENING_REPORT_TYPE"; then
-        ((success_count++))
-        reports_submitted+=("$HB_HARDENING_REPORT_TYPE")
-    else
-        ((fail_count++))
-        reports_failed+=("$HB_HARDENING_REPORT_TYPE")
-    fi
-    echo ""
-
-    # Print summary
-    echo "======================================"
-    echo "Submission Summary"
-    echo "======================================"
-    echo "Successful: $success_count"
-    if [[ ${#reports_submitted[@]} -gt 0 ]]; then
-        printf '  - %s\n' "${reports_submitted[@]}"
-    fi
-    echo ""
-    echo "Failed: $fail_count"
-    if [[ ${#reports_failed[@]} -gt 0 ]]; then
-        printf '  - %s\n' "${reports_failed[@]}"
-    fi
-    echo ""
-
-    # Exit with appropriate code
-    if [[ $fail_count -gt 0 ]]; then
-        echo "Not every report reached the server"
-        return 1
-    else
-        echo "All reports submitted successfully"
-        return 0
-    fi
-}
 
 # ==============================================================================
 # ISO27001 COMPLIANCE CHECK FUNCTIONS
