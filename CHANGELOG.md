@@ -235,6 +235,31 @@
     saying so
   - `schema_version` is now `2`. A document carrying `count` is a generation a
     version-1 consumer does not fully understand, which is what the field is for
+- **Retired system information formats no longer read** - The client stopped
+  producing `neofetch.json`, `neofetch.txt` and `fastfetch.txt`, and the
+  collection server accepts only `fastfetch.json`, but the reading path still
+  fell back to all three - labelling that path "Legacy neofetch.json used - no
+  live data" itself
+  - The legacy path carried no `kernel_latest`, so a directory that took it
+    produced a report whose kernel comparison was silently absent
+  - System information now comes from `fastfetch.json` only. A directory without
+    it stops the run with an error naming the file, the command that produces it,
+    and any retired format found beside it - so a directory plainly holding
+    system information is not simply called empty
+  - The refusal happens before anything is fetched or written, so a directory the
+    client will not analyse is left exactly as it was found
+  - `lib/check-os-status.sh` is a standalone duplicate that `RUNME.sh` never
+    calls; the live path is `extract_os_info()` and `check_os_status()` in
+    `lib/_library`, which carried the same fallback chain. Both were fixed -
+    changing only the script would have left the behaviour unchanged
+  - With the directory refused at the door, the remaining legacy branches in
+    asset inventory, Nix detection, NixOS detection, the xlsx report and the
+    username resolver became unreachable and were removed rather than left as
+    dead code that still reads as support
+  - Verified by regenerating every artifact from a real output directory before
+    and after: all byte-identical
+  - Archives produced before the fastfetch migration stay readable; it is only
+    re-analysis that no longer accepts them
 
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 

@@ -809,6 +809,15 @@ check-output(){
    fi
  fi
 
+ # No system information, no analysis. Checked before anything is fetched or
+ # written, so a directory in a retired format is left exactly as it was found.
+ if ! require_fastfetch_json "$output_dir"; then
+   if [[ "$cleanup_extracted" == true ]]; then
+     rm -rf "$output_dir"
+   fi
+   exit 1
+ fi
+
  # Fetch latest release information if cache doesn't exist or is old
  echo ""
  echo "Checking for latest release information..."
@@ -816,9 +825,8 @@ check-output(){
  echo ""
 
  # Run the OS status check
- check_os_status "$output_dir"
-
- local exit_code=$?
+ local exit_code=0
+ check_os_status "$output_dir" || exit_code=$?
 
  # Generate asset inventory
  echo ""

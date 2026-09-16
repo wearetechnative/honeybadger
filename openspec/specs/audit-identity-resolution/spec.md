@@ -11,7 +11,7 @@ comes from, in what order, and what happens when none of the sources answer.
 
 ## Requirements
 
-### Requirement: Username comes from the audit data
+### Requirement: Username comes from the recorded fetch data
 
 The audit SHALL determine the username of the person who ran it from the data
 the audit recorded, not by parsing it back out of the output directory's name.
@@ -30,10 +30,10 @@ the audit recorded, not by parsing it back out of the output directory's name.
 - **WHEN** the audit recorded a username that itself contains a hyphen
 - **THEN** that username is reported in full
 
-#### Scenario: Older archives still read back
+#### Scenario: Retired formats are not consulted
 - **WHEN** an output directory has no `fastfetch.json` but has `neofetch.json`
   or `neofetch.txt`
-- **THEN** the username is taken from that file instead
+- **THEN** the username is not taken from those files
 
 #### Scenario: No source answers
 - **WHEN** no recorded source and no parsable directory name yields a username

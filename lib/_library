@@ -238,6 +238,41 @@ get_kernel_info() {
 # OS INFORMATION EXTRACTION
 # ==============================================================================
 
+# The one system information format this client reads.
+#
+# fastfetch.json is what the audit writes and the only member the collection
+# server accepts. Reading neofetch.json, neofetch.txt or fastfetch.txt as well
+# kept a retired shape alive in the code that most needs one shape, and the
+# legacy path carried no kernel_latest - so a directory that took it produced a
+# report with the kernel comparison silently missing.
+#
+# A directory without fastfetch.json is missing its system information. It is
+# not a directory in an older format to be read differently.
+#
+# Usage: require_fastfetch_json <output_dir>
+# Returns: 0 when present, 1 otherwise (with an explanation on stderr)
+require_fastfetch_json() {
+    local output_dir="$1"
+
+    [[ -f "$output_dir/fastfetch.json" ]] && return 0
+
+    echo "ERROR: $output_dir/fastfetch.json is missing" >&2
+    echo "  System information is read from fastfetch.json and nothing else." >&2
+    echo "  It is written by: sudo ./RUNME.sh audit" >&2
+
+    local legacy found=""
+    for legacy in neofetch.json neofetch.txt fastfetch.txt; do
+        [[ -f "$output_dir/$legacy" ]] && found+=" $legacy"
+    done
+    if [[ -n "$found" ]]; then
+        echo "  This directory carries a retired format ($found ) from before the" >&2
+        echo "  fastfetch migration. Those archives stay readable, but re-analysis" >&2
+        echo "  needs an audit from a current client." >&2
+    fi
+
+    return 1
+}
+
 # Extract OS information from Honeybadger output directory
 # Usage: extract_os_info <output_dir>
 # Sets global variables: OS_NAME, OS_VERSION, OS_CODENAME, OS_FULLNAME, KERNEL_VERSION
@@ -261,32 +296,12 @@ extract_os_info() {
         fi
     fi
 
-    # Prefer fastfetch.json, fallback to neofetch.json, neofetch.txt, or fastfetch.txt
-    local fetch_file=""
-    local fetch_format=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        fetch_file="$output_dir/fastfetch.json"
-        fetch_format="json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        fetch_file="$output_dir/neofetch.json"
-        fetch_format="json"
-    elif [[ -f "$output_dir/neofetch.txt" ]]; then
-        fetch_file="$output_dir/neofetch.txt"
-        fetch_format="txt"
-    elif [[ -f "$output_dir/fastfetch.txt" ]]; then
-        fetch_file="$output_dir/fastfetch.txt"
-        fetch_format="txt"
-    fi
+    local fetch_file="$output_dir/fastfetch.json"
 
-    if [[ -n "$fetch_file" ]]; then
+    if [[ -f "$fetch_file" ]]; then
         # Get OS info if not already set
         if [[ -z "$OS_NAME" ]]; then
-            if [[ "$fetch_format" == "json" ]]; then
-                OS_FULLNAME=$(jq -r '.os // empty' "$fetch_file" 2>/dev/null)
-            else
-                local os_line=$(grep "^OS:" "$fetch_file" | head -1)
-                [[ -n "$os_line" ]] && OS_FULLNAME=$(echo "$os_line" | sed 's/^OS: //')
-            fi
+            OS_FULLNAME=$(jq -r '.os // empty' "$fetch_file" 2>/dev/null)
 
             if [[ -n "$OS_FULLNAME" ]]; then
                 # Handle different formats
@@ -303,15 +318,8 @@ extract_os_info() {
 
         # Always try to get kernel from fetch file
         if [[ -z "$KERNEL_VERSION" ]]; then
-            if [[ "$fetch_format" == "json" ]]; then
-                KERNEL_RAW=$(jq -r '.kernel // empty' "$fetch_file" 2>/dev/null)
-                [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
-            else
-                local kernel_line=$(grep "^Kernel:" "$fetch_file" | head -1)
-                if [[ -n "$kernel_line" ]]; then
-                    KERNEL_VERSION=$(echo "$kernel_line" | grep -oP '\d+\.\d+\.\d+' | head -1)
-                fi
-            fi
+            KERNEL_RAW=$(jq -r '.kernel // empty' "$fetch_file" 2>/dev/null)
+            [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
         fi
     fi
 
@@ -340,6 +348,9 @@ check_os_status() {
         echo "ERROR: Directory $output_dir does not exist"
         return 1
     fi
+
+    # Before anything is fetched or written: no system information, no analysis.
+    require_fastfetch_json "$output_dir" || return 1
 
     # Fetch latest release info if needed
     if [[ ! -d "$cache_dir" ]] || [[ ! -f "$cache_dir/nixos-releases.json" ]]; then
@@ -1277,14 +1288,19 @@ hb_parse_output_dirname() {
     return 1
 }
 
+# The directory's own name, without running basename(1). Pure expansion, so it
+# works under a restricted PATH - which the test suite deliberately uses.
+_hb_dir_basename() {
+    local path="${1%/}"
+    printf '%s' "${path##*/}"
+}
+
 # Print the username the audit recorded, on stdout.
 #
 # Order, each consulted only when the previous produced nothing:
 #
 #   1. fastfetch.json .user   what the audit recorded, run as the real user
-#   2. neofetch.json .user    the same field, archives from before the switch
-#   3. neofetch.txt user@host the same value, from before either was JSON
-#   4. the directory name     archives carrying none of the above
+#   2. the directory name     a directory whose fetch file is unreadable
 #
 # Returns 1 and prints nothing when no source answers, so the caller decides
 # what an unknown user means instead of being handed a plausible default.
@@ -1293,15 +1309,9 @@ hb_parse_output_dirname() {
 hb_audit_username() {
     local output_dir="$1"
     local candidate=""
-    local fetch_json=""
+    local fetch_json="$output_dir/fastfetch.json"
 
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        fetch_json="$output_dir/fastfetch.json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        fetch_json="$output_dir/neofetch.json"
-    fi
-
-    if [[ -n "$fetch_json" ]] && command -v jq >/dev/null 2>&1; then
+    if [[ -f "$fetch_json" ]] && command -v jq >/dev/null 2>&1; then
         candidate=$(jq -r '.user // empty' "$fetch_json" 2>/dev/null)
         if [[ -n "$candidate" ]]; then
             printf '%s' "$candidate"
@@ -1309,15 +1319,7 @@ hb_audit_username() {
         fi
     fi
 
-    if [[ -f "$output_dir/neofetch.txt" ]]; then
-        candidate=$(grep -m1 '^[A-Za-z0-9_.-]*@' "$output_dir/neofetch.txt" 2>/dev/null | cut -d'@' -f1)
-        if [[ -n "$candidate" ]]; then
-            printf '%s' "$candidate"
-            return 0
-        fi
-    fi
-
-    if hb_parse_output_dirname "$(basename "$output_dir")"; then
+    if hb_parse_output_dirname "$(_hb_dir_basename "$output_dir")"; then
         if [[ -n "$HB_DIR_USERNAME" ]]; then
             printf '%s' "$HB_DIR_USERNAME"
             return 0
@@ -1342,7 +1344,7 @@ hb_report_basename() {
 
     # hb_audit_username() leaves HB_DIR_DATE set only when it fell through to
     # the directory name, so parse explicitly rather than relying on that.
-    hb_parse_output_dirname "$(basename "$output_dir")" || true
+    hb_parse_output_dirname "$(_hb_dir_basename "$output_dir")" || true
 
     if [[ -n "$username" && -n "$HB_DIR_DATE" ]]; then
         printf 'honeybadger-%s-%s-%s.md' "$username" "$HB_DIR_DATE" "$kind"
@@ -1443,16 +1445,9 @@ generate_asset_inventory() {
         serial="$HB_SERIAL_STATUS"
     fi
 
-    # Get hardware info from fastfetch.json, neofetch.json or neofetch.txt
-    local _hw_json=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        _hw_json="$output_dir/fastfetch.json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        _hw_json="$output_dir/neofetch.json"
-    fi
-
-    if [[ -n "$_hw_json" ]]; then
-        # Extract from JSON
+    # Get hardware info from fastfetch.json
+    local _hw_json="$output_dir/fastfetch.json"
+    if [[ -f "$_hw_json" ]]; then
         model=$(jq -r '.host // empty' "$_hw_json" 2>/dev/null)
         kernel=$(jq -r '.kernel // empty' "$_hw_json" 2>/dev/null)
 
@@ -1460,14 +1455,6 @@ generate_asset_inventory() {
         if [[ "$hostname" == "Unknown" ]]; then
             local json_hostname=$(jq -r '.hostname // empty' "$_hw_json" 2>/dev/null)
             [[ -n "$json_hostname" ]] && hostname="$json_hostname"
-        fi
-    elif [[ -f "$output_dir/neofetch.txt" ]]; then
-        # Fallback to text parsing for backward compatibility
-        model=$(grep "^Host:" "$output_dir/neofetch.txt" | sed 's/^Host: //' | head -1)
-        kernel=$(grep "^Kernel:" "$output_dir/neofetch.txt" | sed 's/^Kernel: //' | head -1)
-
-        if [[ "$hostname" == "Unknown" ]]; then
-            hostname=$(grep "^[a-z]*@" "$output_dir/neofetch.txt" | cut -d'@' -f2 | awk '{print $1}' | head -1)
         fi
     fi
 
@@ -1495,16 +1482,11 @@ generate_asset_inventory() {
     # Check for Nix installation
     if [[ "$os_full" =~ "NixOS" ]]; then
         nix_installed="Yes (NixOS)"
-    elif [[ -f "$output_dir/fastfetch.json" ]] || [[ -f "$output_dir/neofetch.json" ]]; then
-        # Check JSON for nix packages (prefer fastfetch.json)
-        local _nix_json=""
-        [[ -f "$output_dir/fastfetch.json" ]] && _nix_json="$output_dir/fastfetch.json" || _nix_json="$output_dir/neofetch.json"
-        local packages=$(jq -r '.packages // empty' "$_nix_json" 2>/dev/null)
+    elif [[ -f "$output_dir/fastfetch.json" ]]; then
+        local packages=$(jq -r '.packages // empty' "$output_dir/fastfetch.json" 2>/dev/null)
         if [[ -n "$packages" ]] && echo "$packages" | grep -q "nix-"; then
             nix_installed="Yes"
         fi
-    elif [[ -f "$output_dir/neofetch.txt" ]] && grep -q "nix-" "$output_dir/neofetch.txt"; then
-        nix_installed="Yes"
     elif [[ -f "$output_dir/installed-packages.txt" ]] && grep -qi "nix" "$output_dir/installed-packages.txt"; then
         nix_installed="Yes"
     else
@@ -2097,9 +2079,8 @@ is_nixos() {
         fi
     fi
 
-    # Fallback: check fastfetch.json or neofetch.json
-    local _os_json=""
-    [[ -f "$output_dir/fastfetch.json" ]] && _os_json="$output_dir/fastfetch.json" || _os_json="$output_dir/neofetch.json"
+    # Fallback: check fastfetch.json
+    local _os_json="$output_dir/fastfetch.json"
     if [[ -f "$_os_json" ]] && command -v jq >/dev/null 2>&1; then
         local os=$(jq -r '.os // ""' "$_os_json" 2>/dev/null)
         if [[ "$os" =~ "NixOS" ]]; then
@@ -3029,14 +3010,8 @@ generate_xlsx_asset_row_report() {
     # hb_audit_username() reads that same field, so there is one source.
     local scan_user="$username"
 
-    local hw_json=""
-    if [[ -f "$output_dir/fastfetch.json" ]]; then
-        hw_json="$output_dir/fastfetch.json"
-    elif [[ -f "$output_dir/neofetch.json" ]]; then
-        hw_json="$output_dir/neofetch.json"
-    fi
-
-    if [[ -n "$hw_json" ]] && command -v jq >/dev/null 2>&1; then
+    local hw_json="$output_dir/fastfetch.json"
+    if [[ -f "$hw_json" ]] && command -v jq >/dev/null 2>&1; then
         local model_raw=$(jq -r '.host // ""' "$hw_json" 2>/dev/null)
         if [[ -n "$model_raw" ]]; then
             model_cell="$model_raw"

@@ -17,6 +17,29 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
     exit 1
 fi
 
+# System information is read from fastfetch.json and nothing else. A directory
+# without it is missing its system information, not a directory in an older
+# format to be read differently - the legacy path carried no kernel_latest, so
+# taking it produced a report whose kernel comparison was silently absent.
+#
+# Checked before the report file is created, so nothing is written into a
+# directory this script will not analyse.
+if [[ ! -f "$OUTPUT_DIR/fastfetch.json" ]]; then
+    echo "ERROR: $OUTPUT_DIR/fastfetch.json is missing" >&2
+    echo "  System information is read from fastfetch.json and nothing else." >&2
+    echo "  It is written by: sudo ./RUNME.sh audit" >&2
+    LEGACY_FOUND=""
+    for LEGACY in neofetch.json neofetch.txt fastfetch.txt; do
+        [[ -f "$OUTPUT_DIR/$LEGACY" ]] && LEGACY_FOUND+=" $LEGACY"
+    done
+    if [[ -n "$LEGACY_FOUND" ]]; then
+        echo "  This directory carries a retired format ($LEGACY_FOUND ) from before the" >&2
+        echo "  fastfetch migration. Those archives stay readable, but re-analysis" >&2
+        echo "  needs an audit from a current client." >&2
+    fi
+    exit 1
+fi
+
 # Fetch latest release info if cache doesn't exist or is old
 if [[ ! -d "$CACHE_DIR" ]] || [[ ! -f "$CACHE_DIR/nixos-releases.json" ]]; then
     if [[ -f "$SCRIPT_DIR/fetch-os-releases.sh" ]]; then
@@ -129,32 +152,13 @@ if [[ -f "$OUTPUT_DIR/lynis-report.json" ]]; then
     fi
 fi
 
-# Prefer fastfetch.json, fallback to neofetch.json, neofetch.txt or fastfetch.txt
-FETCH_FILE=""
-FETCH_FORMAT=""
-if [[ -f "$OUTPUT_DIR/fastfetch.json" ]]; then
-    FETCH_FILE="$OUTPUT_DIR/fastfetch.json"
-    FETCH_FORMAT="json"
-elif [[ -f "$OUTPUT_DIR/neofetch.json" ]]; then
-    FETCH_FILE="$OUTPUT_DIR/neofetch.json"
-    FETCH_FORMAT="json"
-elif [[ -f "$OUTPUT_DIR/neofetch.txt" ]]; then
-    FETCH_FILE="$OUTPUT_DIR/neofetch.txt"
-    FETCH_FORMAT="txt"
-elif [[ -f "$OUTPUT_DIR/fastfetch.txt" ]]; then
-    FETCH_FILE="$OUTPUT_DIR/fastfetch.txt"
-    FETCH_FORMAT="txt"
-fi
+# The one supported format; its presence was established above.
+FETCH_FILE="$OUTPUT_DIR/fastfetch.json"
 
 if [[ -n "$FETCH_FILE" ]]; then
     # Get OS info if not already set
     if [[ -z "$OS_NAME" ]]; then
-        if [[ "$FETCH_FORMAT" == "json" ]]; then
-            OS_FULLNAME=$(jq -r '.os // empty' "$FETCH_FILE" 2>/dev/null)
-        else
-            OS_LINE=$(grep "^OS:" "$FETCH_FILE" | head -1)
-            [[ -n "$OS_LINE" ]] && OS_FULLNAME=$(echo "$OS_LINE" | sed 's/^OS: //')
-        fi
+        OS_FULLNAME=$(jq -r '.os // empty' "$FETCH_FILE" 2>/dev/null)
 
         if [[ -n "$OS_FULLNAME" ]]; then
             # Handle different formats
@@ -171,15 +175,8 @@ if [[ -n "$FETCH_FILE" ]]; then
 
     # Always try to get kernel from fetch file (more reliable than lynis)
     if [[ -z "$KERNEL_VERSION" ]]; then
-        if [[ "$FETCH_FORMAT" == "json" ]]; then
-            KERNEL_RAW=$(jq -r '.kernel // empty' "$FETCH_FILE" 2>/dev/null)
-            [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
-        else
-            KERNEL_LINE=$(grep "^Kernel:" "$FETCH_FILE" | head -1)
-            if [[ -n "$KERNEL_LINE" ]]; then
-                KERNEL_VERSION=$(echo "$KERNEL_LINE" | grep -oP '\d+\.\d+\.\d+' | head -1)
-            fi
-        fi
+        KERNEL_RAW=$(jq -r '.kernel // empty' "$FETCH_FILE" 2>/dev/null)
+        [[ -n "$KERNEL_RAW" ]] && KERNEL_VERSION=$(echo "$KERNEL_RAW" | grep -oP '\d+\.\d+\.\d+' | head -1)
     fi
 fi
 
@@ -531,7 +528,7 @@ else
 
     # Read kernel_latest from fastfetch.json (live data from kernel.org)
     KERNEL_LATEST=""
-    if [[ -n "$FETCH_FILE" && "$FETCH_FORMAT" == "json" ]] && command -v jq >/dev/null 2>&1; then
+    if [[ -f "$FETCH_FILE" ]] && command -v jq >/dev/null 2>&1; then
         KERNEL_LATEST=$(jq -r '.kernel_latest // empty' "$FETCH_FILE" 2>/dev/null)
         # Strip invalid results from curl timeout (e.g. "null (null)")
         [[ "$KERNEL_LATEST" =~ ^null ]] && KERNEL_LATEST=""
@@ -551,16 +548,13 @@ else
         echo "Status: YES - UPSTREAM MAINTAINED" >> "$REPORT_FILE"
         echo "Update Stream: ACTIVE" >> "$REPORT_FILE"
         echo "Upstream Latest: $KERNEL_LATEST_VERSION (released: $KERNEL_LATEST_DATE)" >> "$REPORT_FILE"
-    elif [[ "$FETCH_FORMAT" == "json" ]]; then
-        # fastfetch.json present but kernel_latest empty → series EOL upstream
+    else
+        # kernel_latest empty with fastfetch.json present → series EOL upstream.
+        # There is no other way to get here: a directory without fastfetch.json
+        # is refused before this report is opened.
         echo "Status: UPSTREAM EOL OR UNKNOWN" >> "$REPORT_FILE"
         echo "Update Stream: NO ACTIVE UPSTREAM RELEASES FOUND" >> "$REPORT_FILE"
         echo "Note: kernel.org shows no active releases for the $KERNEL_MAJOR.$KERNEL_MINOR series" >> "$REPORT_FILE"
-    else
-        # Legacy neofetch.json used → no live data
-        echo "Status: UNKNOWN - no kernel_latest data available" >> "$REPORT_FILE"
-        echo "Note: Run audit with fastfetch for live kernel comparison" >> "$REPORT_FILE"
-        echo "      Or check https://kernel.org for current status" >> "$REPORT_FILE"
     fi
 
     echo "" >> "$REPORT_FILE"
@@ -600,7 +594,7 @@ else
                 echo "Note: Verify patch status via your distribution's security channels." >> "$REPORT_FILE"
                 ;;
         esac
-    elif [[ "$FETCH_FORMAT" == "json" ]]; then
+    else
         # Series EOL upstream
         case "$OS_NAME" in
             Ubuntu)
@@ -613,9 +607,6 @@ else
                 echo "Recommendation: Upgrade to an actively maintained kernel series." >> "$REPORT_FILE"
                 ;;
         esac
-    else
-        echo "No live kernel data available." >> "$REPORT_FILE"
-        echo "Check https://kernel.org for current status." >> "$REPORT_FILE"
     fi
 
     if [[ "$KERNEL_MAJOR" -lt 5 ]]; then

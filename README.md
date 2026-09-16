@@ -245,6 +245,15 @@ was derived from. It also marks the columns you maintain yourself (asset ID, own
 remarks) and the two columns that contain formulas and must not be overwritten. Honeybadger never
 reads from or writes to the spreadsheet - updating the register stays a manual step.
 
+`check-output` needs `fastfetch.json` in the directory it analyses. That is the only system
+information format honeybadger reads, and the only one the collection server accepts. A directory
+without it stops the run with an error naming the file, rather than producing a report whose
+kernel comparison is quietly missing.
+
+Directories produced before the fastfetch migration carry `neofetch.json`, `neofetch.txt` or
+`fastfetch.txt` instead. They predate the 2026-03 audit round: the archives stay readable, but
+re-analysing one needs an audit from a current client.
+
 ## ISO27001 Compliance Requirements
 
 **Minimum Requirements:**
