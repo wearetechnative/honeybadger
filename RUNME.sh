@@ -538,8 +538,28 @@ fi
 
 make_command "submit" "Submit the audit archive to honeybadger-server"
 submit(){
- # Parse optional tar file parameter
- local tar_file="$1"
+ # Parse arguments: an optional --config <file> and an optional archive.
+ local tar_file="" config_file=""
+ while [[ $# -gt 0 ]]; do
+   case "$1" in
+     --config)
+       config_file="$2"
+       if [[ -z "$config_file" ]]; then
+         echo "ERROR: --config needs a file"
+         exit 1
+       fi
+       shift 2
+       ;;
+     --config=*)
+       config_file="${1#--config=}"
+       shift
+       ;;
+     *)
+       tar_file="$1"
+       shift
+       ;;
+   esac
+ done
 
  # If no file specified, find the most recent one
  if [[ -z "$tar_file" ]]; then
@@ -548,7 +568,7 @@ submit(){
    if [[ $? -ne 0 ]]; then
      echo "ERROR: No tar files found. Run audit first or specify a tar file."
      echo ""
-     echo "Usage: ./RUNME.sh submit [tar-file]"
+     echo "Usage: ./RUNME.sh submit [--config <file>] [tar-file]"
      echo "Example: ./RUNME.sh submit honeybadger-hostname-user-20-03-2026.tar.gz"
      echo ""
      echo "Or run an audit first:"
@@ -563,7 +583,7 @@ submit(){
  if [[ ! -f "$tar_file" ]]; then
    echo "ERROR: File not found: $tar_file"
    echo ""
-   echo "Usage: ./RUNME.sh submit [tar-file]"
+   echo "Usage: ./RUNME.sh submit [--config <file>] [tar-file]"
    echo "Example: ./RUNME.sh submit honeybadger-hostname-user-20-03-2026.tar.gz"
    echo ""
    echo "Available tar files:"
@@ -577,7 +597,9 @@ submit(){
  echo ""
 
  # Load configuration
- load_server_config
+ if ! load_server_config "$config_file"; then
+   exit 1
+ fi
  echo ""
 
  # Check if submission is enabled

@@ -1,14 +1,14 @@
 ---
 # honeybadger-6dkw
 title: 'honeybadger: make the client configuration overridable and managed'
-status: todo
+status: completed
 type: epic
 priority: normal
 tags:
     - honeybadger
     - config
 created_at: 2026-09-16T06:27:04Z
-updated_at: 2026-09-16T06:27:04Z
+updated_at: 2026-09-16T06:42:36Z
 ---
 
 The client cannot be pointed at a different server for a test. An environment
@@ -67,3 +67,31 @@ working directory won over the intended test configuration.
 - Deploying `.honeybadger.conf` to audited machines. The file is local by
   design, and the machines are personal laptops rather than servers under
   configuration management.
+
+## Summary of Changes
+
+Settings now resolve as environment, then configuration file, then built-in
+default, and a configuration file can be named with `--config <file>` or
+`HONEYBADGER_CONFIG`. Both are reported in the output.
+
+All three acceptance criteria are met and demonstrated against the real
+configuration:
+
+    $ DRY_RUN=true ./RUNME.sh submit <archive>
+    Loading configuration from: ./.honeybadger.conf
+    From the environment (overriding the file): DRY_RUN
+    DRY-RUN: Would submit tar file
+
+    $ ./RUNME.sh submit --config /tmp/alt.conf <archive>
+    Loading configuration from: /tmp/alt.conf
+    DRY-RUN: Would submit tar file
+      Endpoint: http://localhost:9999/submit-tar
+
+Nothing about how tokens are issued or where the file lives has changed.
+Two child issues were scrapped before implementation: deploying the file
+centrally works against the access boundary it exists for, and the claim that
+the repository ships a production configuration was simply wrong.
+
+New capability `server-configuration`; change archived as
+`2026-09-16-overridable-server-configuration`. Nineteen new assertions in
+`tests/test_server_configuration.sh`; six test files pass.

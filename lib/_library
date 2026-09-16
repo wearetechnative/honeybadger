@@ -1421,36 +1421,102 @@ generate_asset_inventory() {
 
 # Load server configuration from config file
 # Checks in order: ./.honeybadger.conf, ~/.honeybadger.conf, /etc/honeybadger.conf
+# Settings the client resolves, in the order they are reported.
+HB_CONFIG_SETTINGS=(
+    SERVER_ENABLED
+    SERVER_URL
+    SERVER_TOKEN
+    SERVER_TIMEOUT
+    SERVER_RETRY_COUNT
+    DRY_RUN
+    USE_DOCKER_CONVERTER
+)
+
+# Built-in defaults, used only where neither the environment nor a config file
+# supplies a value. Read through indirect expansion in load_server_config,
+# which shellcheck cannot follow.
+# shellcheck disable=SC2034
+HB_CONFIG_DEFAULT_SERVER_ENABLED="false"
+HB_CONFIG_DEFAULT_SERVER_URL="http://localhost:7123/"
+HB_CONFIG_DEFAULT_SERVER_TOKEN=""
+HB_CONFIG_DEFAULT_SERVER_TIMEOUT="30"
+HB_CONFIG_DEFAULT_SERVER_RETRY_COUNT="3"
+HB_CONFIG_DEFAULT_DRY_RUN="false"
+HB_CONFIG_DEFAULT_USE_DOCKER_CONVERTER="false"
+
+# Resolve the server settings.
+#
+# Precedence is environment, then config file, then built-in default. The file
+# used to be sourced after the defaults were applied, which meant it always won
+# and an environment variable could never take effect. That is not only
+# inconvenient: DRY_RUN is a safety control, and it could not be switched on
+# from the environment when the file had it off.
+#
+# Usage: load_server_config [config_file]
 load_server_config() {
-    # Default values
-    SERVER_ENABLED="${SERVER_ENABLED:-false}"
-    SERVER_URL="${SERVER_URL:-http://localhost:7123/}"
-    SERVER_TOKEN="${SERVER_TOKEN:-}"
-    SERVER_TIMEOUT="${SERVER_TIMEOUT:-30}"
-    SERVER_RETRY_COUNT="${SERVER_RETRY_COUNT:-3}"
-    DRY_RUN="${DRY_RUN:-false}"
-    USE_DOCKER_CONVERTER="${USE_DOCKER_CONVERTER:-false}"
+    local explicit="${1:-${HONEYBADGER_CONFIG:-}}"
+    local name
 
-    # Check config files in order
-    local config_files=(
-        "./.honeybadger.conf"
-        "$HOME/.honeybadger.conf"
-        "/etc/honeybadger.conf"
-    )
-
-    for config_file in "${config_files[@]}"; do
-        if [[ -f "$config_file" ]]; then
-            echo "Loading configuration from: $config_file"
-            # Source the config file safely
-            # shellcheck disable=SC1090
-            source "$config_file"
-            return 0
+    # Remember what the environment supplied, before the file can overwrite it.
+    # ${!name+set} distinguishes unset from set-but-empty: exporting a setting
+    # as an empty string is a choice, not an absence.
+    local -a from_environment=()
+    local -A environment_value=()
+    for name in "${HB_CONFIG_SETTINGS[@]}"; do
+        if [[ -n ${!name+set} ]]; then
+            from_environment+=("$name")
+            environment_value["$name"]="${!name}"
         fi
     done
 
-    echo "No configuration file found, using defaults"
-    echo "  SERVER_ENABLED=$SERVER_ENABLED"
-    echo "  SERVER_URL=$SERVER_URL"
+    local loaded=""
+    if [[ -n "$explicit" ]]; then
+        # A named file is a deliberate choice. Falling back to the search order
+        # when it is missing would submit somewhere the caller did not ask for.
+        if [[ ! -f "$explicit" ]]; then
+            echo "ERROR: Configuration file not found: $explicit" >&2
+            return 1
+        fi
+        echo "Loading configuration from: $explicit"
+        # shellcheck disable=SC1090
+        source "$explicit"
+        loaded="$explicit"
+    else
+        local config_file
+        for config_file in "./.honeybadger.conf" "$HOME/.honeybadger.conf" "/etc/honeybadger.conf"; do
+            if [[ -f "$config_file" ]]; then
+                echo "Loading configuration from: $config_file"
+                # shellcheck disable=SC1090
+                source "$config_file"
+                loaded="$config_file"
+                break
+            fi
+        done
+    fi
+
+    # Put the environment back on top of whatever the file set.
+    for name in "${from_environment[@]}"; do
+        printf -v "$name" '%s' "${environment_value[$name]}"
+    done
+
+    # Anything neither source supplied falls back to the built-in default.
+    for name in "${HB_CONFIG_SETTINGS[@]}"; do
+        if [[ -z ${!name+set} ]]; then
+            local default_var="HB_CONFIG_DEFAULT_${name}"
+            printf -v "$name" '%s' "${!default_var}"
+        fi
+    done
+
+    if [[ -z "$loaded" ]]; then
+        echo "No configuration file found, using defaults"
+        echo "  SERVER_ENABLED=$SERVER_ENABLED"
+        echo "  SERVER_URL=$SERVER_URL"
+    fi
+
+    if [[ ${#from_environment[@]} -gt 0 ]]; then
+        echo "From the environment (overriding the file): ${from_environment[*]}"
+    fi
+
     return 0
 }
 
