@@ -260,6 +260,26 @@
     and after: all byte-identical
   - Archives produced before the fastfetch migration stay readable; it is only
     re-analysis that no longer accepts them
+- **`check_os_status`: one name, two exit semantics** - Nothing was broken, but
+  a line said the opposite of what it did
+  - `lib/check-os-status.sh` exits a severity (0 PASS, 1 WARNING, 2 EOL/FAIL).
+    `check_os_status()` in `lib/_library` ended on `cat "$report_file"`, so it
+    returned `cat`'s status - never a severity, and non-zero only when it bailed
+    out early
+  - `check-output` captured that status and exited with it, which reads as
+    "carry the OS severity out as the audit's exit status". It could not: the
+    callee was the function, not the script
+  - The resulting behaviour was right - an audit that failed because someone's
+    OS is approaching end of life would be wrong, since a caller on a schedule
+    could not tell that from a broken client - but right by accident
+  - The library function is now `generate_os_status_report()`: it writes
+    `os-kernel-status.txt`, and its exit status says whether it produced the
+    report. The script keeps its name and its severity, which are correct for a
+    command an operator runs directly
+  - Both call sites now read identically and warn on a genuine failure;
+    `check-output` exits 0, with the reason stated where the forwarding used to
+    be. A missing directory or a missing `fastfetch.json` still exits non-zero
+  - Each entry point now documents its own exit contract where it is defined
 
 ## 0.6.0 - Enhanced ISO27001 Compliance Reporting (March 2026)
 

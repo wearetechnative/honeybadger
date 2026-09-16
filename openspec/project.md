@@ -118,7 +118,7 @@ thoroughly auditing device security configurations.
 
 #### Status Analysis
 - `extract_os_info()`: Extract OS data from multiple sources (lynis, fastfetch, lsb_release)
-- `check_os_status()`: Main analysis function generating os-kernel-status.txt
+- `generate_os_status_report()`: Writes os-kernel-status.txt. Its exit status says whether the report was produced, never a severity
 - `analyze_nixos_status()`: NixOS-specific analysis with PASS/WARNING/FAIL
 - `analyze_ubuntu_status()`: Ubuntu-specific analysis
 - `analyze_debian_status()`: Debian-specific analysis

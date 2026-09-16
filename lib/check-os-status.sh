@@ -6,6 +6,19 @@
 # Usage: ./check-os-status.sh <output-directory>
 # Example: ./check-os-status.sh output-wtoorren-04-02-2026
 #
+# Exit status is a SEVERITY, not a success flag:
+#
+#   0  PASS
+#   1  WARNING
+#   2  EOL / FAIL
+#
+# That is the right interface for a command an operator runs on one directory
+# and reads the answer from, so a healthy-but-warning run exiting 1 is intended.
+#
+# It is deliberately not what generate_os_status_report() in lib/_library does.
+# That one is a step inside a longer run and its status says only whether the
+# report was produced, because an audit must not fail because of a finding.
+#
 
 OUTPUT_DIR="${1:-.}"
 CACHE_DIR="${2:-.cache}"

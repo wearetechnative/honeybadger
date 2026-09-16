@@ -512,7 +512,7 @@ audit(){
    fetch_os_releases .cache >/dev/null 2>&1 || echo "  Warning: Could not fetch latest release information"
 
    # Run OS/kernel status check
-   check_os_status "$output" .cache || echo "  Warning: Could not complete OS/kernel analysis"
+   generate_os_status_report "$output" .cache || echo "  Warning: Could not complete OS/kernel analysis"
 
    # Run OS update history check
    echo "Checking OS update history..."
@@ -824,9 +824,11 @@ check-output(){
  fetch_os_releases .cache
  echo ""
 
- # Run the OS status check
- local exit_code=0
- check_os_status "$output_dir" || exit_code=$?
+ # Write the OS/kernel status report. Its severity is deliberately not carried
+ # out as an exit status: an OS approaching end of life is a finding, and a
+ # caller on a schedule must be able to tell that from a run that broke. The
+ # severity is in os-kernel-status.txt and in the compliance report.
+ generate_os_status_report "$output_dir" || echo "  Warning: Could not complete OS/kernel analysis"
 
  # Generate asset inventory
  echo ""
@@ -867,7 +869,9 @@ check-output(){
  echo "  ✓ honeybadger-*-xlsx.md (velden voor de ISO27001 asset-register)"
  echo ""
 
- exit $exit_code
+ # The reports were written. Anything that would make this a failed run - no
+ # such directory or archive, no fastfetch.json - exited long before here.
+ exit 0
 }
 
 make_command "fetch-releases" "Fetch latest OS release information"

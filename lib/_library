@@ -338,9 +338,21 @@ extract_os_info() {
 # OS STATUS CHECKING
 # ==============================================================================
 
-# Check OS status and generate report
-# Usage: check_os_status <output_dir> [cache_dir]
-check_os_status() {
+# Write os-kernel-status.txt for an audit output directory, and print it.
+#
+# The exit status says whether the report was produced - a missing directory, or
+# one with no system information. It is never a severity. An OS approaching end
+# of life is a finding, and a finding is not a failed run: a caller on a
+# schedule has to be able to tell a broken client from a machine whose kernel is
+# a patch behind.
+#
+# The severity lives in the report, under SECTION 1 and the summary, and in the
+# compliance report that reads it. `lib/check-os-status.sh` is a separate entry
+# point that does exit a severity, deliberately - see its header.
+#
+# Usage: generate_os_status_report <output_dir> [cache_dir]
+# Returns: 0 when the report was written, non-zero when it could not be
+generate_os_status_report() {
     local output_dir="$1"
     local cache_dir="${2:-$CACHE_DIR}"
 

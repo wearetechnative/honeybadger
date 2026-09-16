@@ -191,24 +191,24 @@ test_current_directories_still_resolve_from_the_fetch_file() {
     teardown
 }
 
-test_check_os_status_refuses_a_legacy_directory() {
+test_the_report_generator_refuses_a_legacy_directory() {
     setup
     local dir status
     dir=$(make_legacy_dir neofetch.json)
-    check_os_status "$dir" "$WORK/cache" >/dev/null 2>&1
+    generate_os_status_report "$dir" "$WORK/cache" >/dev/null 2>&1
     status=$?
 
     assert_failure "analysis does not run without system information" "$status"
     teardown
 }
 
-test_check_os_status_writes_nothing_into_a_refused_directory() {
+test_the_report_generator_writes_nothing_into_a_refused_directory() {
     # The refusal happens before the report file is opened, so a directory the
     # client will not analyse is left exactly as it was found.
     setup
     local dir
     dir=$(make_legacy_dir neofetch.json)
-    check_os_status "$dir" "$WORK/cache" >/dev/null 2>&1
+    generate_os_status_report "$dir" "$WORK/cache" >/dev/null 2>&1
 
     ASSERTIONS=$((ASSERTIONS + 1))
     if [[ -f "$dir/os-kernel-status.txt" ]]; then
