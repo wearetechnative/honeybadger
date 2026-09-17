@@ -78,6 +78,21 @@
 
 ### Fixed
 
+- **Submissions arrived with no hostname on hosts without `inetutils`** - `submit` resolved the
+  machine's name with `hostname -s`, the tool the audit itself stopped depending on. Arch's base
+  install does not carry it
+  - On such a host the submission went out with no `X-Hostname` header at all and the client
+    printed `Submission complete!`, so badgersbay stored the evidence against a machine with no
+    name and nobody was told. The submit path has no `set -e` - it is set inside `audit()` - so
+    the failing command's status was simply discarded
+  - The hostname now comes from `hb_resolve_short_hostname()`, the same `uname -n` → `$HOSTNAME`
+    → `/etc/hostname` chain the audit uses to name its output, and is shortened to its first
+    label as `hostname -s` did
+  - A submission that cannot determine a hostname now stops and names the sources it tried,
+    rather than sending evidence that cannot be attributed
+  - The guard test that was meant to stop this covered `RUNME.sh` only, which is how the second
+    call survived. It now covers every shell source the audit ships and catches a bare
+    `$(hostname)` as well as the `-s` and `-f` forms
 - **`submit` rejected for the system information report** - `./RUNME.sh submit` failed with
   `HTTP 400` for the system information report while `submit-tar` succeeded
   - The client read `fastfetch.json` but still labelled it `X-Report-Type: neofetch`, a type

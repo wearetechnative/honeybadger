@@ -2,7 +2,9 @@
 
 ## Purpose
 Generated audit artifacts (tarballs, output directories) must be owned by the actual user who invoked the audit, not root, to ensure users can access and manage their own audit results without requiring sudo privileges.
+
 ## Requirements
+
 ### Requirement: Output Files MUST Be Owned By Actual User
 
 When running audit with sudo, all generated files SHALL be owned by the actual user, not root.
@@ -33,7 +35,8 @@ When running audit with sudo, all generated files SHALL be owned by the actual u
 
 The audit SHALL determine the machine's hostname from sources present on every
 supported platform, so that naming the run's output does not depend on which
-packages a host happens to carry.
+packages a host happens to carry. No shell source the audit ships SHALL invoke
+`hostname(1)`.
 
 #### Scenario: No external hostname tool is used
 - **WHEN** an audit runs on a host where `hostname(1)` is not installed
@@ -57,6 +60,19 @@ packages a host happens to carry.
 #### Scenario: Same result as the previous implementation
 - **WHEN** an audit runs on a host where `hostname -s` previously worked
 - **THEN** the resolved name is the one `hostname -s` reported
+
+#### Scenario: Suite fails on a reintroduced call
+- **WHEN** a call to `hostname(1)` is added to `RUNME.sh` or to any shell
+  source under `lib/`
+- **THEN** the test suite fails and names the offending file and line
+
+#### Scenario: A call without flags is caught too
+- **WHEN** the reintroduced call is `$(hostname)` rather than `hostname -s`
+- **THEN** the test suite fails on it as well
+
+#### Scenario: Prose about the retired tool is not an offence
+- **WHEN** a comment names `hostname -s` to record what the resolver replaced
+- **THEN** the test suite does not report it
 
 ### Requirement: Shorten the hostname to its first label
 

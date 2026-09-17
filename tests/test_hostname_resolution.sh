@@ -313,14 +313,35 @@ $offenders"
     fi
 }
 
-test_runme_no_longer_invokes_the_hostname_tool() {
+test_no_shipped_shell_source_invokes_the_hostname_tool() {
+    local sources=("$REPO_ROOT/RUNME.sh" "$REPO_ROOT/lib/_library")
+    local script
+    for script in "$REPO_ROOT"/lib/*.sh; do
+        [[ -f "$script" ]] && sources+=("$script")
+    done
+
+    # Every shell source the audit ships, not just RUNME.sh: scoping this to
+    # one file is how the second call in lib/_library survived the change that
+    # removed the first. There is no deliberate use of hostname(1) anywhere -
+    # unlike the `local x=$(cmd)` guard above, this one has no exception to
+    # carve out.
+    #
+    # Two shapes are matched: the `-s` and `-f` flags the tool was called with
+    # here, and a bare `$(hostname)`, which is the cheapest way to bring the
+    # dependency back and which the flag-anchored pattern would let through.
+    #
+    # Full-line comments are stripped first. lib/_library documents in prose
+    # what `hostname -s` used to do, next to the resolver that replaced it;
+    # that sentence is this guard working, not an offence against it. A call
+    # with a trailing comment is still caught, because only lines whose first
+    # non-blank character is `#` are dropped.
     local offenders
-    offenders=$(grep -nE '(^|[^[:alnum:]_.-])hostname[[:space:]]+-[sf]' \
-                    "$REPO_ROOT/RUNME.sh" || true)
+    offenders=$(grep -nE '(\$\(|`)[[:space:]]*hostname([[:space:]]|\)|`)|(^|[^[:alnum:]_.$-])hostname[[:space:]]+-[sf]' \
+                    "${sources[@]}" | grep -vE ':[[:space:]]*#' || true)
 
     ASSERTIONS=$((ASSERTIONS + 1))
     if [[ -n "$offenders" ]]; then
-        fail "RUNME.sh still shells out to hostname(1), which Arch does not install:
+        fail "a shipped shell source still shells out to hostname(1), which Arch does not install:
 $offenders"
     fi
 }
