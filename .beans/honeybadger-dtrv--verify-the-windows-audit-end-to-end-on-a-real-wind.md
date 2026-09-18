@@ -5,8 +5,7 @@ status: todo
 type: task
 priority: high
 created_at: 2026-09-18T09:00:03Z
-updated_at: 2026-09-18T09:00:03Z
-parent: honeybadger-k80g
+updated_at: 2026-09-18T09:14:31Z
 ---
 
 honeybadger-k80g brought the Windows client onto the shared archive and submission path, and everything that does not need Windows is covered by tests/Honeybadger.Tests.ps1 under pwsh. What is not covered is data collection itself: Get-CimInstance, Get-BitLockerVolume, Get-MpComputerStatus, the registry reads, the winget install of fastfetch, and tar.exe.
@@ -23,3 +22,35 @@ What is left to do:
 - Submit it to a real badgersbay and confirm the asset resolves.
 
 Elmas machine (LAPTOP-AC06CMEP) and Richard van Os are the two assets this unblocks.
+
+
+## What is waiting on this
+
+`badgersbay-n8g8` - bring Windows into the denominator - is blocked on this
+verification and cannot be started without it.
+
+`MANUAL_CLASSES = {'windows'}` in badgersbay keeps Elma Aker (TARI-00031), Linda
+de Ridder (TARI-00029) and Richard van Os (TARI-00034) out of the round's
+denominator, shown as `manual` with *client cannot submit yet*. That exception
+comes off when this passes, and not before: removing it against a client that
+turns out not to work moves three people into the denominator for a reason
+nobody can act on.
+
+Beans has no cross-repository links, so this note and the one in `badgersbay-n8g8`
+are the whole of that dependency. If either is rewritten, the other stops
+pointing anywhere.
+
+## Two register values this settles as a side effect
+
+Both currently rest on a single reading:
+
+- `TARI-00031` carries `YD063JGA`, read once from `Win32_BIOS` on Elma's laptop,
+  while the ISO tool still holds `AC06CMEP` - the suffix of her Windows hostname
+  `LAPTOP-AC06CMEP`.
+- `TARI-00034` carries `PF-4VBTLB` with the hyphen the ISO tool writes. That
+  hyphen proved to be decoration on Wouter's machine (tool `PF-50L2MR`, machine
+  `PF50L2MR`), and `normalise_serial()` does not strip separators.
+
+So report what the machines actually write in `hardware-serial.txt`, whether or
+not it matches. A submission landing as `serial_not_in_register` is a result
+here, not a failure of this task.
