@@ -1,0 +1,95 @@
+{
+	// The Windows counterpart of fastfetch-config.jsonc.
+	//
+	// It is a separate file rather than a shared one because the Linux config's
+	// `command` modules run /etc/os-release, uname, apt, dnf, pacman and
+	// nixos-rebuild, none of which exist here. The two configs differ in how
+	// they get values and agree on what the values are called: the keys below
+	// are the keys RUNME.sh produces, so one consumer reads both archives.
+	//
+	// Linux-only keys - Kernel Built, Kernel Latest, Updates, Last Update,
+	// Reboot, Load - are omitted rather than filled in from somewhere else. A
+	// key that is absent means it was not collected; a key carrying an invented
+	// value is indistinguishable from a measurement.
+	"$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+	"logo": {
+		"type": "none"
+	},
+	"display": {
+		"separator": ": "
+	},
+	"modules": [
+		{
+			"type": "title",
+			"format": "{user-name}@{host-name}"
+		},
+		{
+			"type": "separator",
+			"string": "-"
+		},
+		{
+			"type": "os",
+			"key": "OS",
+			"format": "{name} {version} {arch}"
+		},
+		{
+			"type": "host",
+			"key": "Host"
+		},
+		{
+			"type": "title",
+			"key": "Hostname",
+			"format": "{host-name}"
+		},
+		{
+			"type": "kernel",
+			"key": "Kernel",
+			"format": "{release}"
+		},
+		{
+			"type": "uptime",
+			"key": "Uptime"
+		},
+		{
+			"type": "packages",
+			"key": "Packages"
+		},
+		{
+			"type": "shell",
+			"key": "Shell"
+		},
+		{
+			"type": "terminal",
+			"key": "Terminal"
+		},
+		{
+			"type": "cpu",
+			"key": "CPU",
+			"format": "{name} ({cores-logical}) @ {freq-max}"
+		},
+		{
+			"type": "gpu",
+			"key": "GPU"
+		},
+		{
+			"type": "memory",
+			"key": "Memory"
+		},
+		{
+			"type": "disk",
+			"key": "Disk (C:)",
+			"folders": "C:\\"
+		},
+		{
+			"type": "localip",
+			"key": "Local IP",
+			"showIpv4": true,
+			"showIpv6": false
+		},
+		{
+			"type": "datetime",
+			"key": "Date",
+			"format": "{year}-{month-pretty}-{day-pretty} {hour-pretty}:{minute-pretty}"
+		}
+	]
+}
