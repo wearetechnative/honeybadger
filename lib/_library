@@ -1814,9 +1814,19 @@ submit_tar_file() {
         return 1
     fi
 
-    # Auto-detect system identity
+    # Auto-detect system identity. The hostname is resolved from sources that
+    # exist everywhere rather than from hostname(1), which Arch's base install
+    # does not carry; a submission the server can only file under an empty name
+    # is worse than one that did not arrive, so this stops instead.
     local hostname
-    hostname=$(hostname -s)
+    if ! hostname=$(hb_resolve_short_hostname); then
+        echo "ERROR: could not determine this machine's hostname" >&2
+        echo "  Tried: uname -n, \$HOSTNAME, /etc/hostname" >&2
+        echo "  The hostname tells the server which machine the evidence" >&2
+        echo "  belongs to, so the submission stops rather than arriving" >&2
+        echo "  without one." >&2
+        return 1
+    fi
     local username
     username="${SUDO_USER:-$(whoami)}"
 

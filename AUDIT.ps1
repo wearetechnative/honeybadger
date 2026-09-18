@@ -13,17 +13,30 @@
 $ErrorActionPreference = "Continue"  # Continue on errors to collect as much data as possible
 $WarningPreference = "SilentlyContinue"
 
-# Task 1.3: Report directory creation logic
-$timestamp = Get-Date -Format "yyyyMMdd"
-$reportDir = "report-$timestamp"
+# The shared logic - the serial rule, the fastfetch parser, the inventory
+# document, naming, submission classification - lives in a module so it can be
+# tested under pwsh on a machine that is not Windows. This script collects from
+# Windows; the module decides what the collected values mean.
+$script:thisDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Import-Module (Join-Path $script:thisDir "lib/Honeybadger.psm1") -Force -ErrorAction Stop
 
 # Task 1.4: Global variables for collected data
 $script:isAdmin = $false
-$script:hostname = ""
-$script:username = ""
+$script:hostname = $env:COMPUTERNAME
+$script:username = $env:USERNAME
 $script:serialNumber = ""
+$script:serialSource = ""
+$script:serialStatus = ""
 $script:osVersion = ""
+$script:model = ""
 $script:reportDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$script:runDate = Get-Date
+
+# Task 1.3: Output directory, named the way every other platform names one, so
+# that check-output and the collection server read a Windows archive like any
+# other. RUNME.sh:123 builds the same string.
+$reportDir = Get-HbOutputDirectoryName $script:hostname $script:username $script:runDate
+$script:archiveName = Get-HbArchiveName $script:hostname $script:username $script:runDate
 
 # BitLocker variables
 $script:bitlockerStatus = ""
@@ -109,60 +122,91 @@ try {
 
 # Task 2.2: Collect hostname and username
 Write-Host "[*] Collecting system information..." -ForegroundColor Green
-$script:hostname = $env:COMPUTERNAME
-$script:username = $env:USERNAME
 
-# Task 2.3: Collect hardware serial number
+# Task 2.3: Collect hardware serial number.
+#
+# The value goes to a file, because hardware-serial.txt is what lets the
+# collection server attribute a submission to an asset in the ISO register - it
+# used to reach the operator only inside the compliance markdown, which the
+# server does not read. Whether the value counts as a serial is decided by the
+# shared rule rather than by a regex local to this script: the placeholder this
+# code used to store as the value, "Not available (VM or unknown hardware)", is
+# in that rule's list and is not a measurement.
 try {
     $bios = Get-CimInstance Win32_BIOS -ErrorAction Stop
-    $serial = $bios.SerialNumber
-
-    # VM detection
-    if ([string]::IsNullOrWhiteSpace($serial) -or
-        $serial -match "To Be Filled|O\.E\.M\.|Default string|Not Specified|System Serial Number|^0+$") {
-        $script:serialNumber = "Not available (VM or unknown hardware)"
-    } else {
-        $script:serialNumber = $serial
-    }
+    $serialResult = Resolve-HbSerial $bios.SerialNumber
 } catch {
-    $script:serialNumber = "Unable to retrieve (Error: $_)"
+    $serialResult = Resolve-HbSerial -QueryFailed
 }
 
-# Task 2.1 & 2.4: Collect OS version with neofetch or WMI
-$neofetchPath = Get-Command neofetch -ErrorAction SilentlyContinue
-if ($neofetchPath) {
-    try {
-        neofetch --stdout | Out-File "$reportDir\neofetch.txt" -Encoding UTF8
-        $script:osVersion = "See neofetch.txt for details"
-    } catch {
-        $script:osVersion = "Neofetch failed"
+$script:serialNumber = $serialResult.Value
+$script:serialSource = $serialResult.Source
+$script:serialStatus = $serialResult.Status
+
+try {
+    $serialResult.Value | Out-File "$reportDir\hardware-serial.txt" -Encoding UTF8
+    if ($serialResult.IsUsable) {
+        $serialResult.Source | Out-File "$reportDir\hardware-serial-source.txt" -Encoding UTF8
+        Write-Host "    Found $($serialResult.Value) via $($serialResult.Source)" -ForegroundColor Gray
+    } else {
+        Write-Host "    No usable serial yet ($($serialResult.Status)) - details at the end of the run" -ForegroundColor Yellow
     }
-} else {
-    Write-Host "[*] Neofetch not found, attempting to install via winget..." -ForegroundColor Yellow
+} catch {
+    Write-Host "WARNING: Could not write hardware-serial.txt: $_" -ForegroundColor Yellow
+}
+
+# Task 2.1 & 2.4: Collect system information with fastfetch.
+#
+# fastfetch.json is the only system-information format the client writes or
+# reads, on every platform - see the system-information-collection capability.
+# There is deliberately no fallback to Win32_OperatingSystem: a fastfetch.json
+# assembled from another source, with some keys missing, is indistinguishable
+# to a consumer from a machine where those values could not be read.
+$fastfetchPath = Get-Command fastfetch -ErrorAction SilentlyContinue
+if (-not $fastfetchPath) {
+    Write-Host "[*] fastfetch not found, attempting to install via winget..." -ForegroundColor Yellow
     try {
         $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
         if ($wingetPath) {
-            winget install neofetch --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            winget install --id Fastfetch-cli.Fastfetch --silent `
+                --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
             Start-Sleep -Seconds 2
-            $neofetchPath = Get-Command neofetch -ErrorAction SilentlyContinue
-            if ($neofetchPath) {
-                neofetch --stdout | Out-File "$reportDir\neofetch.txt" -Encoding UTF8
-                $script:osVersion = "See neofetch.txt for details"
-            }
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                        [System.Environment]::GetEnvironmentVariable("Path", "User")
+            $fastfetchPath = Get-Command fastfetch -ErrorAction SilentlyContinue
         }
     } catch {
-        # Silently continue if winget install fails
+        # Reported below; a failed install is not a different outcome from absence.
     }
+}
 
-    # Fall back to WMI if neofetch still unavailable
-    if (-not $neofetchPath -or $script:osVersion -eq "") {
-        try {
-            $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
-            $script:osVersion = "$($os.Caption) Build $($os.BuildNumber)"
-        } catch {
-            $script:osVersion = "Unable to determine OS version"
+if ($fastfetchPath) {
+    try {
+        $fastfetchConfig = Join-Path $script:thisDir "lib/fastfetch-config-windows.jsonc"
+        $fastfetchLines = & fastfetch --config $fastfetchConfig --logo none 2>$null
+        $fastfetchData = ConvertTo-HbFastfetchJson $fastfetchLines
+
+        if ($fastfetchData.Count -eq 0) {
+            throw "fastfetch produced no parseable output"
         }
+
+        $fastfetchData | ConvertTo-Json -Depth 4 |
+            Out-File "$reportDir\fastfetch.json" -Encoding UTF8
+
+        if ($fastfetchData.Contains("os")) { $script:osVersion = $fastfetchData["os"] }
+        if ($fastfetchData.Contains("host")) { $script:model = $fastfetchData["host"] }
+    } catch {
+        Write-Host "ERROR: fastfetch ran but its output could not be used: $_" -ForegroundColor Red
+        Write-Host "  fastfetch.json is the only system information format this client writes." -ForegroundColor Red
+        exit 1
     }
+} else {
+    Write-Host ""
+    Write-Host "ERROR: fastfetch is required and could not be found or installed." -ForegroundColor Red
+    Write-Host "  Install it with:  winget install Fastfetch-cli.Fastfetch" -ForegroundColor Red
+    Write-Host "  or see https://github.com/fastfetch-cli/fastfetch" -ForegroundColor Red
+    Write-Host ""
+    exit 1
 }
 
 # Task 3: BitLocker Encryption Collection
@@ -472,8 +516,11 @@ if (Test-Path "$reportDir\hardeningkitty.csv") {
 # Task 10: Compliance Report Generation
 Write-Host "[*] Generating compliance report..." -ForegroundColor Green
 
-$reportFilename = "honeybadger-$script:username-$timestamp-compliance.md"
+$reportFilename = Get-HbReportName $script:username "compliance" $script:runDate
 $reportPath = Join-Path $reportDir $reportFilename
+# Named here as well as where it is written, because the compliance report
+# points the reader at it.
+$actionsFilename = Get-HbReportName $script:username "actions" $script:runDate
 
 # Task 10.1-10.9: Create compliance report with all sections
 $complianceReport = @"
@@ -564,7 +611,7 @@ if($script:hkTotalChecks -gt 0){
 **Failed**: $script:hkFailedChecks (High: $script:hkHighSeverity, Medium: $script:hkMediumSeverity, Low: $script:hkLowSeverity)
 **Categories**: $script:hkCategories
 
-See ``honeybadger-$script:username-$timestamp-actions.md`` for detailed remediation steps.
+See ``$actionsFilename`` for detailed remediation steps.
 "@
 }else{
     $complianceReport += "HardeningKitty audit was not completed. Check script output for errors."
@@ -592,7 +639,6 @@ try {
 # Task 11: Actions Report Generation
 Write-Host "[*] Generating actions report..." -ForegroundColor Green
 
-$actionsFilename = "honeybadger-$script:username-$timestamp-actions.md"
 $actionsPath = Join-Path $reportDir $actionsFilename
 
 # Task 11.1-11.6: Create actions report
@@ -698,12 +744,95 @@ try {
     Write-Host "    ERROR: Failed to write actions report: $_" -ForegroundColor Red
 }
 
+# Task 11.8: Machine-readable asset inventory.
+#
+# The counterpart of the two markdown reports, in the shape the collection
+# server reads. Built from the determinations made above rather than by
+# evaluating the collected data a second time - whether BitLocker counts as
+# encryption is platform knowledge, and a second implementation of these rules
+# would drift from the first.
+Write-Host "[*] Writing machine-readable asset inventory..." -ForegroundColor Green
+try {
+    $osUptodateCell = switch ($script:updateCompliant) {
+        "✅" { "Yes" }
+        "⚠️" { "Yes" }
+        default { "No" }
+    }
+
+    $findings = [ordered]@{
+        os = New-HbFinding $script:osVersion $script:osVersion
+        disk_encryption = New-HbFinding `
+            $(if ($script:bitlockerCompliant) { "Yes" } else { "No" }) `
+            $script:bitlockerDetails
+        screen_lock = New-HbFinding `
+            $(if ($script:screenLockCompliant) { "Yes" } else { "No" }) `
+            $script:screenLockDetails
+        firewall = New-HbFinding `
+            $(if ($script:firewallCompliant) { "Yes" } else { "No" }) `
+            $script:firewallDetails
+        antivirus = New-HbFinding `
+            $(if ($script:defenderCompliant) { "Yes" } else { "No" }) `
+            $script:defenderDetails
+        # Windows has no package audit tool in this client's dependency set, so
+        # nothing was counted. A null count is "nothing looked", which is not
+        # the same as a measured zero.
+        vulnerable_packages = New-HbFinding "" `
+            "niet vastgesteld - geen package audit tool aanwezig op Windows" "count" $null
+        hardening_score = New-HbHardeningScoreFinding `
+            -TotalChecks $script:hkTotalChecks `
+            -PassedChecks $script:hkPassedChecks `
+            -HighSeverity $script:hkHighSeverity `
+            -MediumSeverity $script:hkMediumSeverity `
+            -LowSeverity $script:hkLowSeverity
+        os_uptodate = New-HbFinding $osUptodateCell $script:updateDetails
+    }
+
+    $honeybadgerVersion = "unknown"
+    $versionFile = Join-Path $script:thisDir "VERSION-honeybadger"
+    if (Test-Path $versionFile) {
+        $honeybadgerVersion = (Get-Content $versionFile -Raw).Trim()
+    }
+
+    $inventory = New-HbAssetInventory `
+        -Hostname $script:hostname `
+        -Username $script:username `
+        -ScanDate $script:reportDate `
+        -Serial $script:serialNumber `
+        -Model $script:model `
+        -Findings $findings `
+        -HoneybadgerVersion $honeybadgerVersion
+
+    ConvertTo-HbInventoryJson $inventory |
+        Out-File "$reportDir\asset-inventory.json" -Encoding UTF8
+
+    Write-Host "    ✓ Machine-readable asset inventory: $reportDir\asset-inventory.json" -ForegroundColor Green
+} catch {
+    Write-Host "    ERROR: Failed to write asset-inventory.json: $_" -ForegroundColor Red
+}
+
 # Task 12.4 & 12.5: Verification and final success message
 Write-Host ""
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "  Audit Complete!" -ForegroundColor Cyan
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host ""
+
+# The serial is the key the collection server matches an asset on, so an audit
+# that determined none says so where the operator is looking, rather than
+# completing silently and being noticed weeks later in the register.
+if ($script:serialStatus -ne "ok") {
+    Write-Host "Hardware serial: none determined" -ForegroundColor Yellow
+    if ($script:serialStatus -eq (Get-HbSerialNotPresent)) {
+        Write-Host "  The firmware reports no serial, which a virtual machine legitimately does." -ForegroundColor Yellow
+        Write-Host "  hardware-serial.txt contains '$($script:serialNumber)'." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Win32_BIOS could not be queried, so nothing was read." -ForegroundColor Yellow
+        Write-Host "  hardware-serial.txt contains '$($script:serialNumber)'." -ForegroundColor Yellow
+    }
+    Write-Host "  The collection server resolves an asset by serial; this submission will need" -ForegroundColor Yellow
+    Write-Host "  the hostname to be matched by hand." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 if ((Test-Path $reportPath) -and (Test-Path $actionsPath)) {
     Write-Host "Reports generated successfully:" -ForegroundColor Green
@@ -714,17 +843,36 @@ if ((Test-Path $reportPath) -and (Test-Path $actionsPath)) {
     }
     Write-Host ""
 
-    # Create ZIP archive
-    Write-Host "[*] Creating ZIP archive..." -ForegroundColor Green
-    $zipFileName = "honeybadger-$script:hostname-$script:username-$timestamp.zip"
+    # Create the tar archive.
+    #
+    # tar, not zip: the collection server's archive endpoint is what carries the
+    # hardware serial, and a zip cannot be submitted to it. tar.exe is bsdtar
+    # and has shipped with Windows since 10 build 17063, so this needs nothing
+    # installed.
+    Write-Host "[*] Creating tar archive..." -ForegroundColor Green
+    $tarFileName = $script:archiveName
     try {
-        Compress-Archive -Path $reportDir -DestinationPath $zipFileName -Force
-        if (Test-Path $zipFileName) {
-            $zipSize = [math]::Round((Get-Item $zipFileName).Length / 1KB, 1)
-            Write-Host "    ✓ ZIP archive created: $zipFileName ($zipSize KB)" -ForegroundColor Green
+        $tarPath = Get-Command tar -ErrorAction SilentlyContinue
+        if (-not $tarPath) {
+            throw "tar was not found on PATH (Windows 10 build 17063 and later ship it)"
+        }
+
+        & tar -czf $tarFileName $reportDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "tar exited with status $LASTEXITCODE"
+        }
+
+        if (Test-Path $tarFileName) {
+            $tarSize = [math]::Round((Get-Item $tarFileName).Length / 1KB, 1)
+            Write-Host "    ✓ Archive created: $tarFileName ($tarSize KB)" -ForegroundColor Green
+            Write-Host "    Submit it with: .\submit-report.ps1" -ForegroundColor White
+        } else {
+            throw "tar reported success but no archive was written"
         }
     } catch {
-        Write-Host "    WARNING: Failed to create ZIP archive: $_" -ForegroundColor Yellow
+        Write-Host "    ERROR: Failed to create the archive: $_" -ForegroundColor Red
+        Write-Host "    The collected output is still in $reportDir and can be" -ForegroundColor Yellow
+        Write-Host "    archived by hand: tar -czf $tarFileName $reportDir" -ForegroundColor Yellow
     }
     Write-Host ""
 

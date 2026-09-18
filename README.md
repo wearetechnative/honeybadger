@@ -269,9 +269,18 @@ Systems failing these requirements will be flagged in the `asset-inventory.txt` 
 
 ### Prerequisites (Windows 11)
 
-Honeybadger for Windows uses HardeningKitty for security auditing. No additional software installation is required.
+Honeybadger for Windows uses HardeningKitty for security auditing, which ships
+with the repository.
 
-**Optional:** `neofetch` (automatically installed via winget if missing)
+**Required:** `fastfetch` - installed automatically via winget if missing. The
+audit stops if it cannot be installed: `fastfetch.json` is the only system
+information format the client writes or reads, on every platform, and a file
+assembled from another source with some keys missing is indistinguishable to a
+consumer from a machine where those values could not be read.
+
+```powershell
+winget install Fastfetch-cli.Fastfetch
+```
 
 ### Running the Audit
 
@@ -316,25 +325,48 @@ cd C:\temp\honeybadger-main
 
 #### Step 3: Submit Report (Optional)
 
-After the audit completes, you can optionally submit the ZIP file to your compliance server:
+After the audit completes, submit the archive to the collection server:
 
 ```powershell
 .\submit-report.ps1
 ```
 
+It posts the most recent `honeybadger-*.tar.gz` to `SERVER_URL/submit-tar`. The
+archive is the unit of submission because it carries `hardware-serial.txt`,
+which is what lets the server attribute the submission to an asset in the ISO
+register.
+
 **First time:** Copy `.honeybadger.conf.example` to `.honeybadger.conf` and configure:
 - `SERVER_ENABLED=true`
-- `SERVER_URL=https://your-server.com/api/reports`
+- `SERVER_URL=https://your-server.com/`
 - `SERVER_TOKEN=hb_token_your_token_here`
+
+Anything set in the environment overrides the file, and the client reports which
+settings it took from there:
+
+```powershell
+$env:SERVER_URL = "http://localhost:7123/"; .\submit-report.ps1
+$env:DRY_RUN = "true"; .\submit-report.ps1   # show what would be sent
+```
 
 ### Output Files (Windows)
 
-The audit generates reports in `report-<date>/`:
+The audit generates reports in `output-<hostname>-<user>-<date>/`, the same
+layout every platform uses:
 
 - `honeybadger-<user>-<date>-compliance.md` - ISO27001 compliance report with pass/fail status
 - `honeybadger-<user>-<date>-actions.md` - Prioritized security remediation items
+- `asset-inventory.json` - the same determinations in the shape the collection server reads
+- `fastfetch.json` - system information
+- `hardware-serial.txt` - the serial the server resolves the asset by
 - `hardeningkitty.csv` - Detailed HardeningKitty audit results
-- `honeybadger-<hostname>-<user>-<date>.zip` - ZIP archive containing all reports (created automatically)
+- `honeybadger-<hostname>-<user>-<date>.tar.gz` - the archive, created automatically
+
+HardeningKitty reports pass/fail counts by severity rather than a score out of
+100, so `findings.hardening_score.value` is null on Windows, `tool` is
+`hardeningkitty`, and the counts that were measured travel in the finding text.
+A number invented to fill that column would be compared against the Linux
+fleet's real Lynis scores.
 
 ### What Gets Audited (Windows)
 
@@ -372,8 +404,8 @@ The script will warn you which checks are unavailable and continue with remainin
 
 When the script has run successfully, a compressed archive with findings is stored in the same directory:
 
-**Linux/macOS:** `honeybadger-hostname-user-date.tar.bz2` (tarball)
-**Windows:** `honeybadger-hostname-user-date.zip` (ZIP archive)
+**Linux/macOS:** `honeybadger-hostname-user-date.tar.gz`
+**Windows:** `honeybadger-hostname-user-date.tar.gz`
 
 Send this file to your CISO or the person who requested the audit.
 

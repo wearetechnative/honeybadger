@@ -19,9 +19,11 @@ install_curl_stub() {
     local dir="$1"
     link_real_tools "$dir"
     # link_real_tools covers the serial chain's needs; submission also shells
-    # out to these.
+    # out to these. hostname(1) is deliberately absent: Arch's base install
+    # does not carry it, and a stub PATH that supplies it cannot observe what
+    # a submission does on a host that has not got it.
     local tool src
-    for tool in hostname whoami mktemp tar gzip head tail tr date env basename dirname; do
+    for tool in whoami mktemp tar gzip head tail tr date env basename dirname; do
         src=$(command -v "$tool" 2>/dev/null) || continue
         ln -sf "$src" "$dir/$tool"
     done
@@ -71,12 +73,21 @@ setup_submission_env() {
     SERVER_TIMEOUT="5"
     SERVER_RETRY_COUNT="1"
     DRY_RUN="false"
+
+    # Drive the hostname chain to a known value. uname is not on the stub PATH,
+    # so resolution falls to $HOSTNAME - which is set here rather than left at
+    # the real machine's name, so no assertion depends on where the suite runs.
+    ORIGINAL_HOSTNAME="${HOSTNAME:-}"
+    HOSTNAME="submithost"
+    HB_HOSTNAME_FILE="$WORKDIR/nonexistent-hostname"
 }
 
 teardown_submission_env() {
     cd "$ORIGINAL_PWD" || true
     PATH="$ORIGINAL_PATH"
     HOME="$ORIGINAL_HOME"
+    HOSTNAME="$ORIGINAL_HOSTNAME"
+    HB_HOSTNAME_FILE=""
     [[ -n "$WORKDIR" && -d "$WORKDIR" ]] && rm -rf "$WORKDIR"
     WORKDIR=""
 }
@@ -239,8 +250,87 @@ test_submission_sends_authentication_and_identity_headers() {
     args=$(curl_args)
 
     assert_contains "$args" "Authorization: Bearer test-token" "the bearer token is sent"
-    assert_contains "$args" "X-Hostname: " "the hostname is sent"
+    # The resolved name, not merely the header's presence: "X-Hostname: " is
+    # satisfied by an empty value, which is exactly what a host with a broken
+    # hostname(1) used to send.
+    assert_contains "$args" "X-Hostname: submithost" "the resolved hostname is sent"
     assert_contains "$args" "X-Username: " "the username is sent"
+
+    teardown_submission_env
+}
+
+# ------------------------------------------------------------ host identity
+
+test_submission_does_not_shell_out_to_the_hostname_tool() {
+    # The condition this guards is a stock Arch host: hostname(1) lives in
+    # inetutils, which the base install does not carry. submit_tar_file() does
+    # not wrap its assignment in `local`, so under RUNME.sh's `set -e` a
+    # missing command aborted the submission after a successful audit.
+    setup_submission_env
+    local dir
+    dir=$(make_output_dir)
+    local tarball="$WORKDIR/honeybadger-testhost-tester-15-09-2026.tar.gz"
+    tar czf "$tarball" -C "$WORKDIR" "$(basename "$dir")" 2>/dev/null
+
+    # A hostname(1) that reports being called. Present rather than absent so
+    # that an invocation is visible instead of merely failing.
+    stub_tool "$WORKDIR/bin" hostname 'echo "hostname(1) was invoked" >&2; exit 1'
+
+    local stderr_file="$WORKDIR/submit-stderr.txt"
+    local status
+    submit_tar_file "$tarball" >/dev/null 2>"$stderr_file"
+    status=$?
+
+    assert_success "submission on a host without a usable hostname(1)" "$status"
+    assert_equals "" "$(cat "$stderr_file")" "hostname(1) must never be invoked"
+    assert_contains "$(curl_args)" "X-Hostname: submithost" "the resolved name is sent"
+
+    teardown_submission_env
+}
+
+test_a_fully_qualified_name_is_shortened_in_the_header() {
+    setup_submission_env
+    local dir
+    dir=$(make_output_dir)
+    local tarball="$WORKDIR/honeybadger-testhost-tester-15-09-2026.tar.gz"
+    tar czf "$tarball" -C "$WORKDIR" "$(basename "$dir")" 2>/dev/null
+
+    HOSTNAME="web01.example.com"
+
+    submit_tar_file "$tarball" >/dev/null 2>&1
+
+    local args
+    args=$(curl_args)
+    assert_contains "$args" "X-Hostname: web01" "the domain is cut off, as hostname -s did"
+    if [[ "$args" == *"X-Hostname: web01.example.com"* ]]; then
+        fail "the fully qualified name reached the header"
+    fi
+    ASSERTIONS=$((ASSERTIONS + 1))
+
+    teardown_submission_env
+}
+
+test_submission_stops_when_no_hostname_can_be_determined() {
+    # badgersbay stores what X-Hostname says. A submission sent without one is
+    # filed against a machine that does not exist, and nothing on the client
+    # says so - worse than a submission that did not arrive.
+    setup_submission_env
+    local dir
+    dir=$(make_output_dir)
+    local tarball="$WORKDIR/honeybadger-testhost-tester-15-09-2026.tar.gz"
+    tar czf "$tarball" -C "$WORKDIR" "$(basename "$dir")" 2>/dev/null
+
+    HOSTNAME=""
+
+    local output status
+    output=$(submit_tar_file "$tarball" 2>&1)
+    status=$?
+
+    assert_failure "submitting without a resolvable hostname" "$status"
+    assert_contains "$output" "could not determine" "the reason is named"
+    assert_contains "$output" "uname -n" "the sources tried are named"
+    assert_contains "$output" "/etc/hostname" "the last source is named"
+    assert_equals "" "$(curl_args)" "the server is not contacted"
 
     teardown_submission_env
 }

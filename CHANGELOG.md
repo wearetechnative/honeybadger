@@ -4,6 +4,58 @@
 
 ### Added
 
+- **Windows tar submission and machine-readable output** - the Windows client
+  produced neither a tar nor a structured summary, so the two Windows assets in
+  the ISO register bypassed the portal entirely and had no historical evidence.
+  It now produces the same archive every other platform does and submits it over
+  the same path.
+  - `fastfetch.json` replaces `neofetch.txt`, in the same flat shape `RUNME.sh`
+    produces, from a Windows fastfetch config shipped beside the Linux one.
+    fastfetch is installed through winget when absent; the audit stops rather
+    than assembling a half-populated file from another source.
+  - `hardware-serial.txt` and `hardware-serial-source.txt` are written, judged
+    by the same rule `lib/_library` applies. The client used to store the
+    literal `Not available (VM or unknown hardware)` where a measured serial
+    belongs; that string is a placeholder under the shared rule and is now
+    recorded as `none-present`, distinct from `could-not-read`.
+  - `asset-inventory.json` in the existing generation 2 schema, with `platform`
+    `windows`. HardeningKitty produces no 0-100 figure, so `hardening_score`
+    carries a null value, names `hardeningkitty` as its tool, and reports the
+    counts that were measured - a number invented to fill that column would be
+    compared against the Linux fleet's real Lynis scores.
+  - `output-<host>-<user>-<dd-MM-yyyy>/` inside
+    `honeybadger-<host>-<user>-<dd-MM-yyyy>.tar.gz`, built with the `tar.exe`
+    Windows has shipped since build 17063. The directory was `report-<yyyyMMdd>`,
+    which the shared output-name parser does not read.
+  - `submit-report.ps1` posts to `SERVER_URL/submit-tar` as `application/x-tar`
+    with a bearer token and `X-Hostname` / `X-Username`, and handles 4xx, 207
+    and 5xx with backoff as the `report-submission` capability defines.
+    Environment variables override the config file, and `DRY_RUN` rehearses.
+- **`lib/Honeybadger.psm1`** - the Windows client's logic that is not
+  Windows-specific, in a module that runs under `pwsh` on Linux. Nothing in the
+  Windows client had ever been covered by a test, because it was two
+  top-to-bottom scripts and the machines it is developed on have no PowerShell.
+- **`tests/Honeybadger.Tests.ps1`** - 99 Pester tests over that module and
+  guards over the shipped scripts, run by `tests/run-tests.sh` alongside the
+  bash suite. Skipped with a message, not failed, when `pwsh` or Pester is
+  absent.
+
+### Fixed
+
+- **Windows submissions went to an endpoint that could not file them.**
+  `submit-report.ps1` posted a zip to `SERVER_URL` itself as `application/zip`,
+  an endpoint with no concept of a hardware serial - the same path the Linux
+  client was moved off in `2026-09-16-replace-submit-with-tar`.
+- **The Windows client never showed the operator where a report went.** It
+  printed `"  Server: $config.SERVER_URL"`, which PowerShell renders as the
+  hashtable's type name followed by a literal `.SERVER_URL`.
+- **"No archive found" reported the wrong thing.** `$TarFile` is declared
+  `[string]`, so assigning `$null` to it stores `""` and the `-eq $null` check
+  never fired; the operator saw `Archive not found: ` with nothing after the
+  colon instead of being told to run the audit.
+
+### Added
+
 - **`asset-inventory.json`** - the machine-readable counterpart of
   `asset-inventory.txt`, written into the output directory and therefore into
   the archive. The audit already determined every value the ISO register needs
@@ -78,6 +130,21 @@
 
 ### Fixed
 
+- **Submissions arrived with no hostname on hosts without `inetutils`** - `submit` resolved the
+  machine's name with `hostname -s`, the tool the audit itself stopped depending on. Arch's base
+  install does not carry it
+  - On such a host the submission went out with no `X-Hostname` header at all and the client
+    printed `Submission complete!`, so badgersbay stored the evidence against a machine with no
+    name and nobody was told. The submit path has no `set -e` - it is set inside `audit()` - so
+    the failing command's status was simply discarded
+  - The hostname now comes from `hb_resolve_short_hostname()`, the same `uname -n` → `$HOSTNAME`
+    → `/etc/hostname` chain the audit uses to name its output, and is shortened to its first
+    label as `hostname -s` did
+  - A submission that cannot determine a hostname now stops and names the sources it tried,
+    rather than sending evidence that cannot be attributed
+  - The guard test that was meant to stop this covered `RUNME.sh` only, which is how the second
+    call survived. It now covers every shell source the audit ships and catches a bare
+    `$(hostname)` as well as the `-s` and `-f` forms
 - **`submit` rejected for the system information report** - `./RUNME.sh submit` failed with
   `HTTP 400` for the system information report while `submit-tar` succeeded
   - The client read `fastfetch.json` but still labelled it `X-Report-Type: neofetch`, a type
