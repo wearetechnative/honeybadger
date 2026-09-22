@@ -1,6 +1,6 @@
 # Changelog HoneyBadger
 
-## NEXT VERSION
+## 0.7.0 - Windows submissions, hardware serials and a release process (September 2026)
 
 ### Added
 
