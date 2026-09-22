@@ -21,13 +21,25 @@
   - `--dry-run` prints the same summary and writes nothing, skipping only the
     clean-tree check so a release can be previewed while the entries are still
     being drafted
-  - Nothing is pushed. A tag that reaches the remote cannot be rewritten
-    quietly, so the push stays a separate, deliberate step
+  - The push is never automatic. A tag that reaches the remote cannot be
+    rewritten quietly, so the scripted form prints the command and the
+    interactive form asks
   - `VERSION-honeybadger` now reads 0.6.0, the version the changelog last
     released, and the missing tags `v0.2.0`, `v0.4.1`, `v0.5.0` and `v0.6.0`
     were placed on the commits that declared them in the changelog
+  - Run with no arguments it walks the release: the bump computed from the
+    current version (patch, minor or major, so no one types a version by hand),
+    any OpenSpec changes that report themselves complete offered for archiving,
+    the changelog entries either already written or taken at the prompt, the
+    title, the diff, and a confirmation before committing and before pushing
+  - Answering no at the commit step rolls the working tree back, so an aborted
+    release leaves nothing behind
+  - The annotated tag carries the released changelog entries as its message
+  - More than one `## NEXT VERSION` heading is refused rather than turned into
+    two identical release headings
   - Covered by `tests/test_release.sh`, which runs the real script against a
-    throwaway git repository under `$TMPDIR`
+    throwaway git repository with a bare origin beside it, under `$TMPDIR` -
+    including the interactive prompts, the rollback and a real push
 
 - **Windows tar submission and machine-readable output** - the Windows client
   produced neither a tar nor a structured summary, so the two Windows assets in

@@ -577,33 +577,61 @@ This will show what would be submitted, including the exact curl commands that w
 
 The version lives in three places that have drifted apart before - the
 changelog once recorded 0.5.0 and 0.6.0 while `VERSION-honeybadger` still said
-0.4.1 and neither got a tag. `release.sh` is the only thing that writes them,
-and it writes them together:
+0.4.1 and neither got a tag, so archives in the field reported v0.4.1 long after
+the code had moved on. `release.sh` is the only thing that writes them, and it
+writes them together:
 
 | Where | What it is |
 | --------------------- | -------------------------------------------------- |
 | `VERSION-honeybadger` | read by `RUNME.sh show_version`, `lib/_library` and `AUDIT.ps1`, and recorded as `honeybadger_version` in every `asset-inventory.json` |
 | `CHANGELOG.md` | the `## NEXT VERSION` heading becomes the release |
-| `git tag vX.Y.Z` | annotated, on the release commit |
+| `git tag vX.Y.Z` | annotated, carrying the changelog entries, on the release commit |
 
-Write the changelog entries under `## NEXT VERSION` first, commit them, then
-cut the release:
+### Interactive
+
+Run it with no arguments and it walks the whole release:
+
+```bash
+./release.sh
+```
+
+1. Refuses to start on a dirty working tree, and checks that `origin` is
+   reachable before anything is written
+2. Offers the bump computed from the current version - patch, minor or major -
+   so no one types a version by hand
+3. Lists any OpenSpec changes that report themselves complete and offers to
+   archive them, committing that separately before the release
+4. Either uses the entries already written under `## NEXT VERSION`, or takes
+   them at the prompt (one per line, ending with Ctrl-D or a line holding just
+   a dot)
+5. Asks for the release title, shows the diff, and only then commits and tags
+6. Asks before pushing the branch and the tag
+
+Answering `n` at the commit step rolls the working tree back: nothing is
+committed, nothing is tagged.
+
+### Scripted
+
+Give it a version and it does the same work without asking, and never pushes:
 
 ```bash
 ./release.sh --dry-run 0.7.0 "Windows tar submission"   # show what would change
 ./release.sh 0.7.0 "Windows tar submission"             # bump, rewrite, commit, tag
-git push && git push origin v0.7.0
+git push origin main && git push origin v0.7.0
 ```
 
 The title is optional; without one the heading is `## 0.7.0 (September 2026)`.
 
-Nothing is pushed for you. A tag that reaches the remote cannot be rewritten
-quietly, so that step stays deliberate.
+### What it refuses
 
-The script refuses to run when the version is not `X.Y.Z`, does not come after
-the current one, already has a tag, when `## NEXT VERSION` is missing or empty,
-or when the working tree is dirty. `--dry-run` skips only the clean-tree check,
-so you can preview a release while still drafting.
+A version that is not `X.Y.Z`, one that does not come after the current one,
+one that already has a tag, a missing or empty `## NEXT VERSION`, more than one
+`## NEXT VERSION` heading, and a dirty working tree. `--dry-run` skips only the
+clean-tree check, so a release can be previewed while the entries are still
+being drafted.
+
+A tag that reaches the remote cannot be rewritten quietly, so the push is never
+automatic: the scripted form prints the command, the interactive form asks.
 
 ## Credits
 
