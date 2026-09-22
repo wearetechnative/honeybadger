@@ -4,6 +4,31 @@
 
 ### Added
 
+- **`release.sh`, and one version instead of three** - the version is read by
+  `RUNME.sh show_version`, `lib/_library` and `AUDIT.ps1`, and lands in every
+  `asset-inventory.json` as `honeybadger_version`, but nothing kept those
+  sources together. The changelog recorded 0.5.0 and 0.6.0 while
+  `VERSION-honeybadger` still said 0.4.1, and neither release was tagged, so an
+  archive could not be traced back to the code that produced it.
+  - `release.sh <version> [title]` writes all three together: it bumps
+    `VERSION-honeybadger`, replaces the `## NEXT VERSION` heading with
+    `## <version> - <title> (<Month Year>)`, commits as `Release <version>` and
+    writes the annotated tag `v<version>`
+  - It refuses a version that is not `X.Y.Z`, one that does not come after the
+    current version, one that already has a tag, a missing or empty
+    `## NEXT VERSION`, and a dirty working tree - a release that records nothing
+    or overwrites a tag is worse than no release
+  - `--dry-run` prints the same summary and writes nothing, skipping only the
+    clean-tree check so a release can be previewed while the entries are still
+    being drafted
+  - Nothing is pushed. A tag that reaches the remote cannot be rewritten
+    quietly, so the push stays a separate, deliberate step
+  - `VERSION-honeybadger` now reads 0.6.0, the version the changelog last
+    released, and the missing tags `v0.2.0`, `v0.4.1`, `v0.5.0` and `v0.6.0`
+    were placed on the commits that declared them in the changelog
+  - Covered by `tests/test_release.sh`, which runs the real script against a
+    throwaway git repository under `$TMPDIR`
+
 - **Windows tar submission and machine-readable output** - the Windows client
   produced neither a tar nor a structured summary, so the two Windows assets in
   the ISO register bypassed the portal entirely and had no historical evidence.
