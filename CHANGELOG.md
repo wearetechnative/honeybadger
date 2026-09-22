@@ -1,6 +1,6 @@
 # Changelog HoneyBadger
 
-## 0.7.0 - Windows submissions, hardware serials and a release process (September 2026)
+## NEXT VERSION
 
 ### Added
 
@@ -9,6 +9,10 @@
   had been to know the internal name `show_version` or to read the file
   directly. It is now a listed command like any other. `show_version` is
   unchanged: it still heads `honeybadger-info.txt` in every archive.
+
+## 0.7.0 - Windows submissions, hardware serials and a release process (September 2026)
+
+### Added
 
 - **`release.sh`, and one version instead of three** - the version is read by
   `RUNME.sh show_version`, `lib/_library` and `AUDIT.ps1`, and lands in every
