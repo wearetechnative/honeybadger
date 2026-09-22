@@ -1,6 +1,6 @@
 # Changelog HoneyBadger
 
-## NEXT VERSION
+## 0.7.1 - The version command (September 2026)
 
 ### Added
 
