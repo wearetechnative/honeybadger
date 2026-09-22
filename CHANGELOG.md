@@ -4,6 +4,12 @@
 
 ### Added
 
+- **`./RUNME.sh version`** - the version reaches three consumers, all reading
+  `VERSION-honeybadger`, but the only way to ask a checkout which version it was
+  had been to know the internal name `show_version` or to read the file
+  directly. It is now a listed command like any other. `show_version` is
+  unchanged: it still heads `honeybadger-info.txt` in every archive.
+
 - **`release.sh`, and one version instead of three** - the version is read by
   `RUNME.sh show_version`, `lib/_library` and `AUDIT.ps1`, and lands in every
   `asset-inventory.json` as `honeybadger_version`, but nothing kept those

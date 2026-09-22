@@ -583,7 +583,7 @@ writes them together:
 
 | Where | What it is |
 | --------------------- | -------------------------------------------------- |
-| `VERSION-honeybadger` | read by `RUNME.sh show_version`, `lib/_library` and `AUDIT.ps1`, and recorded as `honeybadger_version` in every `asset-inventory.json` |
+| `VERSION-honeybadger` | read by `RUNME.sh version`, `lib/_library` and `AUDIT.ps1`, and recorded as `honeybadger_version` in every `asset-inventory.json` |
 | `CHANGELOG.md` | the `## NEXT VERSION` heading becomes the release |
 | `git tag vX.Y.Z` | annotated, carrying the changelog entries, on the release commit |
 

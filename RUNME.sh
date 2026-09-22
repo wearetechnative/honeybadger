@@ -886,6 +886,15 @@ run-tests(){
  bash "$thisdir/tests/run-tests.sh" "$@"
 }
 
+make_command "version" "Show the Honeybadger version"
+# show_version writes the banner that also heads honeybadger-info.txt in every
+# archive. This is its command form: without it the only way to ask a checkout
+# which version it is was to know that internal name, or to read
+# VERSION-honeybadger directly.
+version(){
+ show_version
+}
+
 ##### PLACE YOUR COMMANDS ABOVE #####
 
 runme
