@@ -573,6 +573,38 @@ This will show what would be submitted, including the exact curl commands that w
 - Config file: `chmod 600 .honeybadger.conf`
 - Tar files: ensure readable by current user
 
+## Releasing
+
+The version lives in three places that have drifted apart before - the
+changelog once recorded 0.5.0 and 0.6.0 while `VERSION-honeybadger` still said
+0.4.1 and neither got a tag. `release.sh` is the only thing that writes them,
+and it writes them together:
+
+| Where | What it is |
+| --------------------- | -------------------------------------------------- |
+| `VERSION-honeybadger` | read by `RUNME.sh show_version`, `lib/_library` and `AUDIT.ps1`, and recorded as `honeybadger_version` in every `asset-inventory.json` |
+| `CHANGELOG.md` | the `## NEXT VERSION` heading becomes the release |
+| `git tag vX.Y.Z` | annotated, on the release commit |
+
+Write the changelog entries under `## NEXT VERSION` first, commit them, then
+cut the release:
+
+```bash
+./release.sh --dry-run 0.7.0 "Windows tar submission"   # show what would change
+./release.sh 0.7.0 "Windows tar submission"             # bump, rewrite, commit, tag
+git push && git push origin v0.7.0
+```
+
+The title is optional; without one the heading is `## 0.7.0 (September 2026)`.
+
+Nothing is pushed for you. A tag that reaches the remote cannot be rewritten
+quietly, so that step stays deliberate.
+
+The script refuses to run when the version is not `X.Y.Z`, does not come after
+the current one, already has a tag, when `## NEXT VERSION` is missing or empty,
+or when the working tree is dirty. `--dry-run` skips only the clean-tree check,
+so you can preview a release while still drafting.
+
 ## Credits
 
 - [Video Embedding](https://githubvideo.com/)
