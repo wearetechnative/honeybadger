@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Asset ID and proof file from a badgersbay download** - `check-output` on
+  an archive downloaded from badgersbay fills columns A and N of the xlsx
+  report from its name: `TARI-00023-2026-09-17-wouter.toorren.tar.gz` gives
+  asset `TARI-00023` and proof file `TARI-00023-2026-09-17-wouter.toorren`.
+  - Only the register's asset form is taken, because column M reads the date
+    from the twelfth character of the proof file. Any other name, a renamed
+    or duplicated download included, leaves A and N to the operator.
+  - Nothing is looked up: no token, no network, no change to badgersbay.
 - **Firewall evidence in the archive** - the audit writes `firewall-info.txt`
   with the device's `iptables -S` and `nft list ruleset` output and a closing
   `FIREWALL-RULESET:` line, so the firewall verdict can be checked and re-derived

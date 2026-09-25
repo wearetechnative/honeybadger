@@ -246,6 +246,20 @@ was derived from. It also marks the columns you maintain yourself (asset ID, own
 remarks) and the two columns that contain formulas and must not be overwritten. Honeybadger never
 reads from or writes to the spreadsheet - updating the register stays a manual step.
 
+Run `check-output` on an archive downloaded from badgersbay and the report also fills the asset ID
+and the proof file. badgersbay names the download for the asset it belongs to -
+`TARI-00023-2026-09-17-wouter.toorren.tar.gz` - and that name, without `.tar.gz`, is the value the
+proof file column holds and the name of the folder the evidence goes into:
+
+```bash
+./RUNME.sh check-output TARI-00023-2026-09-17-wouter.toorren.tar.gz
+#   A  Asset       TARI-00023
+#   N  proof_file  TARI-00023-2026-09-17-wouter.toorren
+```
+
+An archive named any other way, a renamed download included, leaves both to you. The owner stays
+yours to enter either way: the name carries a short form, the register a full name.
+
 `check-output` needs `fastfetch.json` in the directory it analyses. That is the only system
 information format honeybadger reads, and the only one the collection server accepts. A directory
 without it stops the run with an error naming the file, rather than producing a report whose

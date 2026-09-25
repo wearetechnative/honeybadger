@@ -3316,10 +3316,46 @@ _write_asset_inventory_json() {
     echo "✓ Machine-readable asset inventory: $target"
 }
 
-# Usage: generate_xlsx_asset_row_report <output_dir>
+# Recognise the name badgersbay gives an archive it serves for download:
+# <asset-ID>-<YYYY-MM-DD>[-<owner slug>].tar[.gz], built from the register by
+# evidence_download_name(). That name is what the register's proof_file column
+# holds, and the folder the evidence is filed under.
+#
+# Only the register's asset form is taken. Column M of the sheet reads the
+# date from the twelfth character of proof_file, which is right only for a
+# ten-character asset ID; any other shape would give M a wrong date.
+#
+# Sets HB_DOWNLOAD_ASSET and HB_DOWNLOAD_PROOF and returns 0 for a download
+# name; clears them and returns 1 for anything else.
+# Usage: hb_parse_download_name <archive base name>
+hb_parse_download_name() {
+    local name="$1"
+    HB_DOWNLOAD_ASSET=""
+    HB_DOWNLOAD_PROOF=""
+
+    local re='^(TARI-[0-9]{5})-([0-9]{4}-[0-9]{2}-[0-9]{2})(-[a-z0-9.]+)?\.tar(\.gz)?$'
+    [[ "$name" =~ $re ]] || return 1
+
+    local asset="${BASH_REMATCH[1]}" day="${BASH_REMATCH[2]}"
+    # A calendar date, not merely digits in the right places. GNU date, then BSD.
+    if [[ "$(date -d "$day" +%F 2>/dev/null || date -j -f %F "$day" +%F 2>/dev/null)" != "$day" ]]; then
+        return 1
+    fi
+
+    HB_DOWNLOAD_ASSET="$asset"
+    HB_DOWNLOAD_PROOF="${name%.gz}"
+    HB_DOWNLOAD_PROOF="${HB_DOWNLOAD_PROOF%.tar}"
+    return 0
+}
+
+# Usage: generate_xlsx_asset_row_report <output_dir> [archive base name]
 # Generates: honeybadger-{user}-{date}-xlsx.md
+#
+# The archive name is the one check-output was given. When badgersbay named it,
+# it carries columns A and N; see hb_parse_download_name.
 generate_xlsx_asset_row_report() {
     local output_dir="$1"
+    local archive_name="${2:-}"
 
     if [[ ! -d "$output_dir" ]]; then
         echo "ERROR: Directory $output_dir does not exist" >&2
@@ -3486,8 +3522,24 @@ generate_xlsx_asset_row_report() {
         echo "## Determined by honeybadger"
         echo ""
 
+        # A and N come from the archive name when badgersbay gave it one.
+        local -a from_name_first=() from_name_last=()
+        local -a by_hand=()
+        if [[ -n "$archive_name" ]] && hb_parse_download_name "$archive_name"; then
+            from_name_first=("A"$'\x1f'"Asset"$'\x1f'"$HB_DOWNLOAD_ASSET"$'\x1f'"from the archive name ($archive_name)")
+            from_name_last=("N"$'\x1f'"proof_file"$'\x1f'"$HB_DOWNLOAD_PROOF"$'\x1f'"the archive name, as badgersbay gave it")
+        else
+            by_hand+=("A"$'\x1f'"Asset"$'\x1f'"asset ID from the register (e.g. TARI-00023)")
+        fi
+        by_hand+=("C"$'\x1f'"Owner"$'\x1f'"the register uses full names; scan username: $scan_user")
+        if (( ${#from_name_last[@]} == 0 )); then
+            by_hand+=("N"$'\x1f'"proof_file"$'\x1f'"convention: <asset-ID>-<YYYY-MM-DD>-<name>")
+        fi
+        by_hand+=("O"$'\x1f'"Remarks"$'\x1f'"free text field")
+
         _xlsx_markdown_table \
             "Col"$'\x1f'"Field"$'\x1f'"Cell value"$'\x1f'"Determined as" \
+            "${from_name_first[@]}" \
             "D"$'\x1f'"Serial Number"$'\x1f'"$serial_cell"$'\x1f'"$serial_src" \
             "E"$'\x1f'"Model"$'\x1f'"$model_cell"$'\x1f'"$model_src" \
             "F"$'\x1f'"OS Edition + Version"$'\x1f'"$os_cell"$'\x1f'"$os_src" \
@@ -3496,7 +3548,8 @@ generate_xlsx_asset_row_report() {
             "I"$'\x1f'"Firewall Active"$'\x1f'"$fw_cell"$'\x1f'"$fw_src" \
             "J"$'\x1f'"Vulnerable Packages / Defender"$'\x1f'"see note"$'\x1f'"$vuln_finding" \
             "K"$'\x1f'"Lynis Hardening Score"$'\x1f'"$score_cell"$'\x1f'"$score_src" \
-            "L"$'\x1f'"OS Up-to-date"$'\x1f'"$uptodate_cell"$'\x1f'"$uptodate_src"
+            "L"$'\x1f'"OS Up-to-date"$'\x1f'"$uptodate_cell"$'\x1f'"$uptodate_src" \
+            "${from_name_last[@]}"
 
         echo ""
         echo "### Note on column J"
@@ -3520,10 +3573,7 @@ generate_xlsx_asset_row_report() {
 
         _xlsx_markdown_table \
             "Col"$'\x1f'"Field"$'\x1f'"Notes" \
-            "A"$'\x1f'"Asset"$'\x1f'"asset ID from the register (e.g. TARI-00023)" \
-            "C"$'\x1f'"Owner"$'\x1f'"the register uses full names; scan username: $scan_user" \
-            "N"$'\x1f'"proof_file"$'\x1f'"convention: <asset-ID>-<YYYY-MM-DD>-<name>" \
-            "O"$'\x1f'"Remarks"$'\x1f'"free text field"
+            "${by_hand[@]}"
 
         echo ""
         echo "---"
