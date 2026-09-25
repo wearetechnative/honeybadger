@@ -84,12 +84,12 @@ as the same 900 seconds, and its report gains the same explicit statement of app
 - `windows-compliance-reporting`: the screen lock and antivirus rows state the applied threshold
   and the settings the verdict rests on.
 
-### Added Capabilities
+### Also modified
 
-- `iso27001-compliance-reporting`: this capability has delta specs in
-  `iso27001-compliance-reporting-overhaul` and `add-nixos-supply-chain-check` but was never synced
-  into `openspec/specs/`, so there is no requirement text to modify. The delta here is written as
-  an addition. See Impact.
+- `iso27001-compliance-reporting`: this capability is in `openspec/specs/`, with requirements the
+  change contradicts - a hardening threshold of 75 as a blocker, a screen lock over 15 minutes as a
+  warning only, vulnerable packages from PKGS-7392 alone, and two-state results. Those six
+  requirements are modified; the rules that span every control are added.
 
 ## Impact
 
@@ -124,6 +124,7 @@ as the same 900 seconds, and its report gains the same explicit statement of app
   hardware serial in the system information section). No overlap.
 - Syncing the `iso27001-compliance-reporting` capability from its existing change deltas into
   `openspec/specs/`.
-- Any change to what is collected, beyond the screen lock summary block.
+- Any change to what is collected, beyond the screen lock summary block and reading the lock
+  daemon configuration from the invoking user's home rather than root's.
 - Reconciling the `Vulnerable Packages / Defender` column contradiction in the spreadsheet, which
   `add-xlsx-asset-row-report` documented and deliberately left to the operator.

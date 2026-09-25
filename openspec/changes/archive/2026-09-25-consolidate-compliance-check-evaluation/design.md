@@ -95,6 +95,20 @@ The rule that makes this work: **a caller may reformat the detail string, but ma
 the verdict from it.** The xlsx report maps exit code `0`/`1`/`2` to `Yes`/`No`/`N.A.` and prints
 the detail string in the provenance column. It does not parse the detail string.
 
+### Vulnerable packages: nothing looked is not clean
+
+The checklist row and xlsx column `J` used different Lynis fields: the checklist looked for a
+PKGS-7392 warning, the xlsx report read `vulnerable_packages_found` and `package_audit_tool_found`.
+On a machine without a package audit tool Lynis raises PKGS-7398, reports zero and raises no
+PKGS-7392, so the checklist said `✅ None` while column `J` said "not determined". Worse, the
+checklist's query applied `contains()` to warnings that current Lynis writes as objects; jq failed,
+the error was discarded, and the check reported `None` whatever the report contained.
+
+`check_vulnerable_packages()` becomes the one determination: indeterminate without a package audit
+tool, failed on a count above zero or a PKGS-7392 warning in either format, passed otherwise. Column
+`J` still declines a cell value - the spreadsheet's contradiction is unchanged - but its finding is
+the check's detail string, and the count travels only when a tool looked.
+
 ### Authoritative source selection for screen lock
 
 `screenlock-info.txt` can contain up to six `AUTO-LOCK-STATUS:` lines. Matching the first
@@ -196,10 +210,31 @@ No data migration. Old tarballs remain readable through the documented fallback.
 single release; reports regenerated after it are internally consistent, reports generated before
 it are not, and the provenance document will state from which version consistency is guaranteed.
 
-## Open Questions
+## Resolved Questions
 
-- Should an indeterminate screen lock (`❓`) set the overall status to "Gedeeltelijk compliant",
-  as a disabled screen lock does today, or leave the overall status untouched? Leaning toward
-  "Gedeeltelijk compliant" with the gap named, since an unverifiable control is not a demonstrated
-  control — but this affects the verdict on the maintainer's own hardware and is worth confirming
-  once the re-run in task 5.1 shows how many devices are affected.
+### An indeterminate control holds the device at partial compliance
+
+**Question:** should an indeterminate screen lock (`❓`) set the overall status to "Gedeeltelijk
+compliant", as a disabled screen lock does, or leave the overall status untouched?
+
+**Decision:** "Gedeeltelijk compliant", with the gap named. Confirmed by the maintainer after the
+re-run in task 5.1.
+
+An unverifiable control is not a demonstrated control. The same rule applies to every control that
+returns `2`, not only screen lock: an indeterminate disk encryption, firewall, vulnerable-package or
+NixOS supply chain check is not a blocker - the tool cannot assert a failure it did not observe -
+but it keeps the device out of "✅ Compliant". The compliance report lists each one under
+`### Niet vastgesteld` in the check's own words.
+
+**What 5.1 showed:** for screen lock, none of the six archived tarballs moves. Every one predates the summary block
+and records a 5-minute timeout with all evidence files present, so the fallback evaluates them as
+before. The re-run also showed that the maintainer's own NixOS/Hyprland machine
+would have been the first device affected: `hypridle` runs, but its configuration was read from
+`$HOME/.config/hypr`, which under `sudo` is root's home. Task 2.6 reads it from `$SUDO_USER`'s home
+instead, so that machine resolves to `hypridle` at rank 2 with its configured timeout.
+
+Task 4.6 does move verdicts. Every NixOS tarball reports vulnerable packages as `❓`, because no
+package audit tool looked; the three that were `✅ Compliant` (15-09, 17-09, 22-09) become
+"Gedeeltelijk compliant", and 14-07 and 25-08 stay "Niet compliant" on their firewall. Jeroen's
+Debian scan, where `apt-get` looked, stays `✅ None (apt-get)`. This is the intended correction:
+those scans never established that the packages were clean.
