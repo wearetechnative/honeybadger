@@ -214,7 +214,7 @@ function ConvertTo-HbInventoryScalar {
 .SYNOPSIS
     Build one finding entry: the determined value and what it was derived from.
 .DESCRIPTION
-    Mirrors _inventory_finding(). "N.A." and "zie notitie" are the spreadsheet's
+    Mirrors _inventory_finding(). "N.A." and "see note" are the spreadsheet's
     spellings of "no value here", mapped before the general rule rather than
     inside it. A null value with a finding is distinguishable from a key this
     generation does not emit, which an omitted key would not be.
@@ -242,7 +242,7 @@ function New-HbFinding {
     )
 
     $cellText = if ($null -eq $Cell) { '' } else { [string]$Cell }
-    if ($cellText -eq 'N.A.' -or $cellText -eq 'zie notitie') { $cellText = '' }
+    if ($cellText -eq 'N.A.' -or $cellText -eq 'see note') { $cellText = '' }
 
     $entry = [ordered]@{
         value   = ConvertTo-HbInventoryScalar $cellText
@@ -351,7 +351,7 @@ function New-HbHardeningScoreFinding {
     )
 
     if ($NotRun -or $TotalChecks -le 0) {
-        return New-HbFinding '' 'niet vastgesteld - HardeningKitty is niet uitgevoerd' 'tool' 'hardeningkitty'
+        return New-HbFinding '' 'not determined - HardeningKitty was not run' 'tool' 'hardeningkitty'
     }
 
     $finding = "HardeningKitty: $PassedChecks/$TotalChecks checks geslaagd " +

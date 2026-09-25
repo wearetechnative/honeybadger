@@ -226,15 +226,15 @@ Describe "New-HbFinding" {
 
     It "maps the spreadsheet's spellings of no-value to null" {
         (New-HbFinding "N.A." "not determined")["value"] | Should -BeNullOrEmpty
-        (New-HbFinding "zie notitie" "see note")["value"] | Should -BeNullOrEmpty
+        (New-HbFinding "see note" "see note")["value"] | Should -BeNullOrEmpty
     }
 
     It "keeps the finding text when the value is null" {
         # "not determined, and here is why" has to stay distinguishable from a
         # key this generation does not emit at all.
-        $finding = New-HbFinding "" "niet vastgesteld - geen tool aanwezig"
+        $finding = New-HbFinding "" "not determined - no tool present"
         $finding["value"] | Should -BeNullOrEmpty
-        $finding["finding"] | Should -Be "niet vastgesteld - geen tool aanwezig"
+        $finding["finding"] | Should -Be "not determined - no tool present"
     }
 
     It "carries an extra field beside the cell value" {
@@ -345,7 +345,7 @@ Describe "New-HbAssetInventory" {
 
     It "is valid JSON when findings could not be determined" {
         $partial = [ordered]@{
-            os = New-HbFinding "" "niet vastgesteld"
+            os = New-HbFinding "" "not determined"
             hardening_score = New-HbHardeningScoreFinding -NotRun
         }
         $inventory = New-HbAssetInventory -Hostname "h" -Username "u" -ScanDate "d" `

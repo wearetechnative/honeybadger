@@ -440,7 +440,7 @@ A value the audit could not determine, or deliberately declines to assert, is
 "vulnerable_packages": {
   "value": null,
   "count": null,
-  "finding": "niet vastgesteld - geen package audit tool aanwezig"
+  "finding": "not determined - no package audit tool present"
 }
 ```
 
@@ -457,7 +457,7 @@ validation says `None`, its Status formula counts `Yes` - so `value` stays
 "vulnerable_packages": {
   "value": null,
   "count": 1,
-  "finding": "1 kwetsbare packages gevonden"
+  "finding": "1 vulnerable packages found"
 }
 ```
 

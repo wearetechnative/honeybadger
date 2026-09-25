@@ -777,7 +777,7 @@ try {
         # nothing was counted. A null count is "nothing looked", which is not
         # the same as a measured zero.
         vulnerable_packages = New-HbFinding "" `
-            "niet vastgesteld - geen package audit tool aanwezig op Windows" "count" $null
+            "not determined - no package audit tool present on Windows" "count" $null
         hardening_score = New-HbHardeningScoreFinding `
             -TotalChecks $script:hkTotalChecks `
             -PassedChecks $script:hkPassedChecks `

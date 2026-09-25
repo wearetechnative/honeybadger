@@ -866,7 +866,7 @@ check-output(){
  echo "Generated files:"
  echo "  ✓ honeybadger-*-compliance.md (ISO27001 checklist)"
  echo "  ✓ honeybadger-*-actions.md (Lynis security actions)"
- echo "  ✓ honeybadger-*-xlsx.md (velden voor de ISO27001 asset-register)"
+ echo "  ✓ honeybadger-*-xlsx.md (fields for the ISO27001 asset register)"
  echo ""
 
  # The reports were written. Anything that would make this a failed run - no

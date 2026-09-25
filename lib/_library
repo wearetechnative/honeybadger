@@ -2881,9 +2881,9 @@ _inventory_finding() {
     local key="$1" cell="$2" finding="$3" extra_key="${4:-}" extra_value="${5:-}"
     local value_json
 
-    # "N.A." and "zie notitie" are the spreadsheet's spellings of "no value
+    # "N.A." and "see note" are the spreadsheet's spellings of "no value
     # here", so they are mapped before the general rule rather than inside it.
-    if [[ "$cell" == "N.A." || "$cell" == "zie notitie" ]]; then
+    if [[ "$cell" == "N.A." || "$cell" == "see note" ]]; then
         cell=""
     fi
     value_json=$(_inventory_scalar "$cell")
@@ -2986,47 +2986,47 @@ generate_xlsx_asset_row_report() {
     local -a unavailable=()
 
     # --- metadata -----------------------------------------------------------
-    local hostname="Onbekend"
-    local scan_date="Onbekend"
+    local hostname="Unknown"
+    local scan_date="Unknown"
     local os_cell="N.A."
-    local os_src="lynis-report.json niet beschikbaar"
+    local os_src="lynis-report.json not available"
 
     if [[ "$have_lynis" == true ]]; then
-        hostname=$(jq -r '.hostname // "Onbekend"' "$lynis_file" 2>/dev/null)
-        scan_date=$(jq -r '.report_datetime_start // "Onbekend"' "$lynis_file" 2>/dev/null)
+        hostname=$(jq -r '.hostname // "Unknown"' "$lynis_file" 2>/dev/null)
+        scan_date=$(jq -r '.report_datetime_start // "Unknown"' "$lynis_file" 2>/dev/null)
         local os_full=$(jq -r '.os_fullname // .os_name // ""' "$lynis_file" 2>/dev/null)
         if [[ -n "$os_full" ]]; then
             os_cell="$os_full"
             os_src="$os_full"
         else
-            os_src="os_fullname ontbreekt in lynis-report.json"
+            os_src="os_fullname missing from lynis-report.json"
         fi
     else
-        unavailable+=("lynis-report.json - hostname, scandatum, OS, hardening score en packagegegevens")
+        unavailable+=("lynis-report.json - hostname, scan date, OS, hardening score and package data")
     fi
 
     # --- D: Serial Number ---------------------------------------------------
     local serial_cell="N.A."
-    local serial_src="hardware-serial.txt niet beschikbaar"
+    local serial_src="hardware-serial.txt not available"
     local serial_known=false
 
     if [[ -f "$output_dir/hardware-serial.txt" ]]; then
         if read_recorded_serial "$output_dir"; then
             serial_cell="$HB_SERIAL_VALUE"
-            serial_src="$HB_SERIAL_VALUE (bron: $HB_SERIAL_SOURCE)"
+            serial_src="$HB_SERIAL_VALUE (source: $HB_SERIAL_SOURCE)"
             serial_known=true
         elif [[ "$HB_SERIAL_STATUS" == "$HB_SERIAL_NOT_PRESENT" ]]; then
-            serial_src="none-present - de hardware meldt geen serienummer (gebruikelijk op een VM)"
+            serial_src="none-present - the hardware reports no serial number (common on a VM)"
         else
-            serial_src="could-not-read - geen enkele bron gaf een waarde"
+            serial_src="could-not-read - no source returned a value"
         fi
     else
-        unavailable+=("hardware-serial.txt - serienummer")
+        unavailable+=("hardware-serial.txt - serial number")
     fi
 
     # --- C hint + E: Model --------------------------------------------------
     local model_cell="N.A."
-    local model_src="fastfetch.json niet beschikbaar"
+    local model_src="fastfetch.json not available"
     # Already the audit's own determination. This used to start from the
     # directory name and be corrected from fastfetch a few lines down;
     # hb_audit_username() reads that same field, so there is one source.
@@ -3039,17 +3039,17 @@ generate_xlsx_asset_row_report() {
             model_cell="$model_raw"
             model_src="$model_raw"
         else
-            model_src="host ontbreekt in $(basename "$hw_json")"
+            model_src="host missing from $(basename "$hw_json")"
         fi
     else
         unavailable+=("fastfetch.json - model")
     fi
 
-    [[ -z "$scan_user" ]] && scan_user="onbekend"
+    [[ -z "$scan_user" ]] && scan_user="unknown"
 
     # --- G: Disk Encryption -------------------------------------------------
     local disk_cell="N.A."
-    local disk_src="blockdevices.txt niet beschikbaar"
+    local disk_src="blockdevices.txt not available"
 
     if [[ -f "$output_dir/blockdevices.txt" ]]; then
         if grep -q "crypto_LUKS" "$output_dir/blockdevices.txt" 2>/dev/null; then
@@ -3057,15 +3057,15 @@ generate_xlsx_asset_row_report() {
             disk_src="Yes (LUKS)"
         else
             disk_cell="No"
-            disk_src="geen LUKS-volume aangetroffen"
+            disk_src="no LUKS volume found"
         fi
     else
-        unavailable+=("blockdevices.txt - schijfversleuteling")
+        unavailable+=("blockdevices.txt - disk encryption")
     fi
 
     # --- H: Screen Lock -----------------------------------------------------
     local lock_cell="N.A."
-    local lock_src="screenlock-info.txt niet beschikbaar"
+    local lock_src="screenlock-info.txt not available"
 
     if [[ -f "$output_dir/screenlock-info.txt" ]]; then
         if grep -q "AUTO-LOCK-STATUS: ENABLED" "$output_dir/screenlock-info.txt" 2>/dev/null; then
@@ -3075,19 +3075,19 @@ generate_xlsx_asset_row_report() {
             if [[ -n "$lock_time" ]]; then
                 lock_src="Yes (auto-lock: $lock_time)"
             else
-                lock_src="Yes (auto-lock ingeschakeld)"
+                lock_src="Yes (auto-lock enabled)"
             fi
         else
             lock_cell="No"
-            lock_src="auto-lock niet ingeschakeld"
+            lock_src="auto-lock not enabled"
         fi
     else
-        unavailable+=("screenlock-info.txt - schermvergrendeling")
+        unavailable+=("screenlock-info.txt - screen lock")
     fi
 
     # --- I: Firewall Active -------------------------------------------------
     local fw_cell="N.A."
-    local fw_src="firewallstatus niet vast te stellen"
+    local fw_src="firewall status could not be determined"
     local fw_raw=$(check_firewall_status "$output_dir" 2>/dev/null)
 
     case "$fw_raw" in
@@ -3097,7 +3097,7 @@ generate_xlsx_asset_row_report() {
             ;;
         No)
             fw_cell="No"
-            fw_src="geen firewall gedetecteerd"
+            fw_src="no firewall detected"
             ;;
     esac
 
@@ -3108,7 +3108,7 @@ generate_xlsx_asset_row_report() {
     # The count is a different question, and one the audit can answer. It
     # travels separately so that declining to fill in the cell does not throw
     # away a measurement. Empty means nothing was measured, not zero.
-    local vuln_finding="niet vastgesteld - lynis-report.json niet beschikbaar"
+    local vuln_finding="not determined - lynis-report.json not available"
     local vuln_count_cell=""
 
     if [[ "$have_lynis" == true ]]; then
@@ -3120,28 +3120,28 @@ generate_xlsx_asset_row_report() {
             # This is the condition Lynis raises as PKGS-7398. Reporting it as
             # zero would be the worse bug: a fleet that never looked, filed as
             # clean.
-            vuln_finding="niet vastgesteld - geen package audit tool aanwezig"
+            vuln_finding="not determined - no package audit tool present"
         elif [[ "$vuln_count" == "0" ]]; then
-            vuln_finding="geen kwetsbare packages gevonden"
+            vuln_finding="no vulnerable packages found"
             vuln_count_cell="0"
         else
-            vuln_finding="$vuln_count kwetsbare packages gevonden"
+            vuln_finding="$vuln_count vulnerable packages found"
             vuln_count_cell="$vuln_count"
         fi
     fi
 
     # --- K: Lynis Hardening Score -------------------------------------------
     local score_cell="N.A."
-    local score_src="lynis-report.json niet beschikbaar"
+    local score_src="lynis-report.json not available"
 
     if [[ "$have_lynis" == true ]]; then
         local score=$(jq -r '.hardening_index // ""' "$lynis_file" 2>/dev/null)
         if [[ "$score" =~ ^[0-9]+$ ]]; then
             score_cell="$score"
             if (( score >= HB_MIN_HARDENING_SCORE )); then
-                score_src="${score}/100 - drempel >=${HB_MIN_HARDENING_SCORE} gehaald"
+                score_src="${score}/100 - threshold >=${HB_MIN_HARDENING_SCORE} met"
             else
-                score_src="${score}/100 - drempel >=${HB_MIN_HARDENING_SCORE} niet gehaald"
+                score_src="${score}/100 - threshold >=${HB_MIN_HARDENING_SCORE} not met"
             fi
         else
             score_src="hardening_index ontbreekt in lynis-report.json"
@@ -3152,20 +3152,20 @@ generate_xlsx_asset_row_report() {
     # Three outcomes onto two values: WARNING means supported but not newest,
     # which this register counts as up-to-date. See design.md.
     local uptodate_cell="N.A."
-    local uptodate_src="os-kernel-status.txt niet beschikbaar"
+    local uptodate_src="os-kernel-status.txt not available"
 
     if [[ -f "$output_dir/os-kernel-status.txt" ]]; then
         if grep -q "Result: ✓ PASS" "$output_dir/os-kernel-status.txt" 2>/dev/null; then
             uptodate_cell="Yes"
-            uptodate_src="PASS - actuele release"
+            uptodate_src="PASS - current release"
         elif grep -q "Result: ⚠ WARNING" "$output_dir/os-kernel-status.txt" 2>/dev/null; then
             uptodate_cell="Yes"
-            uptodate_src="WARNING - supported, upgrade aanbevolen"
+            uptodate_src="WARNING - supported, upgrade recommended"
         elif grep -q "Result: ✗ FAIL" "$output_dir/os-kernel-status.txt" 2>/dev/null; then
             uptodate_cell="No"
             uptodate_src="FAIL - end-of-life"
         else
-            uptodate_src="geen herkenbaar resultaat in os-kernel-status.txt"
+            uptodate_src="no recognisable result in os-kernel-status.txt"
         fi
     else
         unavailable+=("os-kernel-status.txt - OS up-to-date status")
@@ -3176,78 +3176,78 @@ generate_xlsx_asset_row_report() {
         echo "# ISO27001 XLSX - Active Assets"
         echo ""
         echo "**Hostname:** $hostname"
-        echo "**Scan datum:** $scan_date"
+        echo "**Scan date:** $scan_date"
         if [[ "$serial_known" == true ]]; then
-            echo "**Zoek de rij op Serial Number:** \`$serial_cell\`"
+            echo "**Find the row by Serial Number:** \`$serial_cell\`"
         else
-            echo "**Rij niet automatisch te vinden:** serienummer onbekend, zoek de rij handmatig"
+            echo "**Row cannot be found automatically:** serial number unknown, find the row by hand"
         fi
         echo ""
-        echo "Dit rapport wijzigt de spreadsheet niet. Neem de celwaarden hieronder met de hand over"
-        echo "in \`iso27001-compliance-essential.xlsx\`, sheet \`Active Assets\`."
+        echo "This report does not change the spreadsheet. Copy the cell values below by hand"
+        echo "into \`iso27001-compliance-essential.xlsx\`, sheet \`Active Assets\`."
         echo ""
         echo "---"
         echo ""
-        echo "## Door honeybadger vastgesteld"
+        echo "## Determined by honeybadger"
         echo ""
 
         _xlsx_markdown_table \
-            "Kol"$'\x1f'"Veld"$'\x1f'"Celwaarde"$'\x1f'"Vastgesteld als" \
+            "Col"$'\x1f'"Field"$'\x1f'"Cell value"$'\x1f'"Determined as" \
             "D"$'\x1f'"Serial Number"$'\x1f'"$serial_cell"$'\x1f'"$serial_src" \
             "E"$'\x1f'"Model"$'\x1f'"$model_cell"$'\x1f'"$model_src" \
             "F"$'\x1f'"OS Edition + Version"$'\x1f'"$os_cell"$'\x1f'"$os_src" \
             "G"$'\x1f'"Disk Encryption"$'\x1f'"$disk_cell"$'\x1f'"$disk_src" \
             "H"$'\x1f'"Screen Lock"$'\x1f'"$lock_cell"$'\x1f'"$lock_src" \
             "I"$'\x1f'"Firewall Active"$'\x1f'"$fw_cell"$'\x1f'"$fw_src" \
-            "J"$'\x1f'"Vulnerable Packages / Defender"$'\x1f'"zie notitie"$'\x1f'"$vuln_finding" \
+            "J"$'\x1f'"Vulnerable Packages / Defender"$'\x1f'"see note"$'\x1f'"$vuln_finding" \
             "K"$'\x1f'"Lynis Hardening Score"$'\x1f'"$score_cell"$'\x1f'"$score_src" \
             "L"$'\x1f'"OS Up-to-date"$'\x1f'"$uptodate_cell"$'\x1f'"$uptodate_src"
 
         echo ""
-        echo "### Notitie bij kolom J"
+        echo "### Note on column J"
         echo ""
-        echo "**Bevinding:** $vuln_finding"
+        echo "**Finding:** $vuln_finding"
         echo ""
-        echo "Honeybadger geeft hier bewust geen celwaarde. De spreadsheet spreekt zichzelf tegen over"
-        echo "welke waarde compliant betekent:"
+        echo "Honeybadger deliberately gives no cell value here. The spreadsheet contradicts itself about"
+        echo "which value means compliant:"
         echo ""
-        echo "- de data-validatie en de notities op \`Compliance Summary\` zeggen \`None\` = compliant"
-        echo "- de \`Status\`-formule rekent \`Yes\` als goed en \`None\` als NOK"
+        echo "- the data validation and the notes on \`Compliance Summary\` say \`None\` = compliant"
+        echo "- the \`Status\` formula counts \`Yes\` as good and \`None\` as NOK"
         echo ""
-        echo "Kies zelf welke waarde je invult, in lijn met de rest van de kolom."
-        echo ""
-        echo "---"
-        echo ""
-        echo "## Zelf bijhouden"
-        echo ""
-        echo "Deze kolommen kan honeybadger niet vaststellen en vult het dus niet in."
-        echo ""
-
-        _xlsx_markdown_table \
-            "Kol"$'\x1f'"Veld"$'\x1f'"Toelichting" \
-            "A"$'\x1f'"Asset"$'\x1f'"asset-ID uit het register (bv. TARI-00023)" \
-            "C"$'\x1f'"Owner"$'\x1f'"het register gebruikt volledige namen; scan-username: $scan_user" \
-            "N"$'\x1f'"proof_file"$'\x1f'"conventie: <asset-ID>-<JJJJ-MM-DD>-<naam>" \
-            "O"$'\x1f'"Remarks"$'\x1f'"vrij tekstveld"
-
+        echo "Choose the value yourself, consistent with the rest of the column."
         echo ""
         echo "---"
         echo ""
-        echo "## Niet overschrijven - formules"
+        echo "## Maintained by hand"
         echo ""
-        echo "Deze cellen bevatten formules. Typ er niets in; dan gaat de berekening verloren."
+        echo "Honeybadger cannot determine these columns, so it leaves them empty."
         echo ""
 
         _xlsx_markdown_table \
-            "Kol"$'\x1f'"Veld"$'\x1f'"Formule" \
-            "B"$'\x1f'"Status"$'\x1f'"array-formule over G:J, K en L" \
-            "M"$'\x1f'"Last_Audit_Date"$'\x1f'"=MID(N2,12,10) - afgeleid van proof_file"
+            "Col"$'\x1f'"Field"$'\x1f'"Notes" \
+            "A"$'\x1f'"Asset"$'\x1f'"asset ID from the register (e.g. TARI-00023)" \
+            "C"$'\x1f'"Owner"$'\x1f'"the register uses full names; scan username: $scan_user" \
+            "N"$'\x1f'"proof_file"$'\x1f'"convention: <asset-ID>-<YYYY-MM-DD>-<name>" \
+            "O"$'\x1f'"Remarks"$'\x1f'"free text field"
+
+        echo ""
+        echo "---"
+        echo ""
+        echo "## Do not overwrite - formulas"
+        echo ""
+        echo "These cells hold formulas. Do not type in them, or the calculation is lost."
+        echo ""
+
+        _xlsx_markdown_table \
+            "Col"$'\x1f'"Field"$'\x1f'"Formula" \
+            "B"$'\x1f'"Status"$'\x1f'"array formula over G:J, K and L" \
+            "M"$'\x1f'"Last_Audit_Date"$'\x1f'"=MID(N2,12,10) - derived from proof_file"
 
         if (( ${#unavailable[@]} > 0 )); then
             echo ""
             echo "---"
             echo ""
-            echo "## Niet beschikbare brongegevens"
+            echo "## Unavailable source data"
             echo ""
             local missing
             for missing in "${unavailable[@]}"; do
@@ -3258,7 +3258,7 @@ generate_xlsx_asset_row_report() {
         echo ""
         echo "---"
         echo ""
-        echo "*Zie compliance report voor de overall status*"
+        echo "*See the compliance report for the overall status*"
     } > "$report_file"
 
     echo "✓ XLSX asset row report generated: $report_file"

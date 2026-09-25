@@ -44,10 +44,10 @@ test_a_numeric_value_is_a_number_not_a_string() {
 test_an_undetermined_value_is_null_with_the_finding_intact() {
     # "N.A." is what the xlsx report renders when a source was unavailable.
     local out
-    out=$(_inventory_finding firewall "N.A." "firewallstatus niet vast te stellen")
+    out=$(_inventory_finding firewall "N.A." "firewall status could not be determined")
 
     assert_equals "null" "$(jq -r '.value | tostring' <<< "$out")" "the value is null"
-    assert_contains "$(jq -r .finding <<< "$out")" "niet vast te stellen" "the reason survives"
+    assert_contains "$(jq -r .finding <<< "$out")" "could not be determined" "the reason survives"
 }
 
 test_a_declined_value_is_null_with_the_finding_intact() {
@@ -55,10 +55,10 @@ test_a_declined_value_is_null_with_the_finding_intact() {
     # spreadsheet contradicts itself about which one means compliant. That
     # refusal is information and has to survive serialisation.
     local out
-    out=$(_inventory_finding vulnerable_packages "" "niet vastgesteld - geen package audit tool aanwezig")
+    out=$(_inventory_finding vulnerable_packages "" "not determined - no package audit tool present")
 
     assert_equals "null" "$(jq -r '.value | tostring' <<< "$out")" "the value is null"
-    assert_contains "$(jq -r .finding <<< "$out")" "geen package audit tool" "the reason says why"
+    assert_contains "$(jq -r .finding <<< "$out")" "no package audit tool" "the reason says why"
 }
 
 test_null_is_distinguishable_from_an_absent_key() {
@@ -119,7 +119,7 @@ test_a_numeric_extra_is_a_number() {
     # "count": "1" would be a number inside a string, which the consumer then
     # has to parse - and can parse wrongly.
     local out
-    out=$(_inventory_finding vulnerable_packages "" "1 kwetsbare packages gevonden" count 1)
+    out=$(_inventory_finding vulnerable_packages "" "1 vulnerable packages found" count 1)
 
     assert_equals "number" "$(jq -r '.count | type' <<< "$out")" "count is a number"
     assert_equals "1" "$(jq -r .count <<< "$out")" "and carries the measurement"
@@ -139,16 +139,16 @@ test_the_count_travels_beside_a_null_cell_value() {
     # The register contradicts itself about which literal means compliant, so
     # the cell stays undecided. The count is a different question.
     local out
-    out=$(_inventory_finding vulnerable_packages "" "1 kwetsbare packages gevonden" count 1)
+    out=$(_inventory_finding vulnerable_packages "" "1 vulnerable packages found" count 1)
 
     assert_equals "null" "$(jq -r '.value | tostring' <<< "$out")" "the cell is still undecided"
     assert_equals "1" "$(jq -r .count <<< "$out")" "and the measurement survives"
-    assert_equals "1 kwetsbare packages gevonden" "$(jq -r .finding <<< "$out")" "finding intact"
+    assert_equals "1 vulnerable packages found" "$(jq -r .finding <<< "$out")" "finding intact"
 }
 
 test_a_determined_zero_is_a_zero() {
     local out
-    out=$(_inventory_finding vulnerable_packages "" "geen kwetsbare packages gevonden" count 0)
+    out=$(_inventory_finding vulnerable_packages "" "no vulnerable packages found" count 0)
 
     assert_equals "number" "$(jq -r '.count | type' <<< "$out")" "zero is a measurement"
     assert_equals "0" "$(jq -r .count <<< "$out")" "and it is zero"
@@ -157,7 +157,7 @@ test_a_determined_zero_is_a_zero() {
 test_an_undetermined_count_is_null() {
     local out
     out=$(_inventory_finding vulnerable_packages "" \
-              "niet vastgesteld - geen package audit tool aanwezig" count "")
+              "not determined - no package audit tool present" count "")
 
     assert_equals "null" "$(jq -r '.count | tostring' <<< "$out")" "nothing looked is not zero"
 }
@@ -167,9 +167,9 @@ test_determined_and_undetermined_are_distinguishable_without_prose() {
     # things, and only the Dutch finding text told them apart.
     local arch ubuntu
     arch=$(_inventory_finding vulnerable_packages "" \
-               "niet vastgesteld - geen package audit tool aanwezig" count "")
+               "not determined - no package audit tool present" count "")
     ubuntu=$(_inventory_finding vulnerable_packages "" \
-               "1 kwetsbare packages gevonden" count 1)
+               "1 vulnerable packages found" count 1)
 
     assert_equals "null" "$(jq -r '.value | tostring' <<< "$arch")" "both cells are null"
     assert_equals "null" "$(jq -r '.value | tostring' <<< "$ubuntu")" "both cells are null"
@@ -185,7 +185,7 @@ write_inventory() {
     local findings
     findings=$(jq -nc \
         --argjson os "$(_inventory_finding os "NixOS 26.05 (Yarara)" "NixOS 26.05 (Yarara)")" \
-        --argjson vuln "$(_inventory_finding vulnerable_packages "" "geen package audit tool")" \
+        --argjson vuln "$(_inventory_finding vulnerable_packages "" "no package audit tool")" \
         --argjson score "$(_inventory_finding hardening_score "72" "72/100" tool lynis)" \
         '{os: $os, vulnerable_packages: $vuln, hardening_score: $score}')
     _write_asset_inventory_json "$INVENTORY_WORKDIR" "$@" "$findings" > /dev/null

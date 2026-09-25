@@ -1,5 +1,18 @@
 # Changelog HoneyBadger
 
+## NEXT VERSION
+
+### Changed
+
+- **The xlsx asset row report is in English** - `honeybadger-*-xlsx.md` was the
+  only report written in Dutch. Headings, instructions and every finding are
+  now English, like the compliance and actions reports.
+  - The findings in `asset-inventory.json` come from the same text, on Linux,
+    macOS and Windows, so they are English too (`not determined - ...`,
+    `3 vulnerable packages found`). Values and keys are unchanged.
+  - Column J's cell reads `see note` instead of `zie notitie`, and still
+    serialises as `null`.
+
 ## 0.7.1 - The version command (September 2026)
 
 ### Added
