@@ -802,6 +802,9 @@ check-output(){
  local input="$1"
  local output_dir=""
  local cleanup_extracted=false
+ # The name of the archive, when given one. A download from badgersbay carries
+ # the asset ID and proof_file in its name, which the xlsx report reads.
+ local archive_name=""
 
  # The reports apply configured thresholds (MIN_HARDENING_SCORE), so they read
  # the same configuration the audit does.
@@ -810,6 +813,7 @@ check-output(){
  # Helper function to extract tarball
  extract_tarball() {
    local tarball="$1"
+   archive_name=$(basename "$tarball")
 
    # Detect compression format and set appropriate tar flags
    local list_flags=""
@@ -962,7 +966,7 @@ check-output(){
  # Generate ISO27001 asset-register row report
  echo ""
  echo "Generating XLSX asset row report..."
- generate_xlsx_asset_row_report "$output_dir"
+ generate_xlsx_asset_row_report "$output_dir" "$archive_name"
 
  # Cleanup extracted directory if we created it
  if [[ "$cleanup_extracted" == true ]]; then
