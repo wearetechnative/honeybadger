@@ -7,7 +7,7 @@
       the maintainer's NixOS machine as root and finding `ACTIVE (iptables, nixos-fw chain)`
 - [x] 1.2 Cover the three result lines with stubbed `iptables` and `nft` in a shell test; verify
       `ACTIVE`, `NONE` and `UNAVAILABLE` are each written for the matching stub
-- [ ] 1.3 Confirm `firewall-info.txt` is included in the archive and owned by the invoking user like
+- [x] 1.3 Confirm `firewall-info.txt` is included in the archive and owned by the invoking user like
       the other output files; verify with `tar -tzf` on an archive produced by the audit
 
 ## 2. Firewall Evaluation From Evidence Only
