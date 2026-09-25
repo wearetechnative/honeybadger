@@ -72,6 +72,8 @@ devices whose firewall Lynis already recognised.
 | `ACTIVE`             | any                     | `0`     | Observed ruleset                          |
 | `NONE`/`UNAVAILABLE` | `1`                     | `0`     | Lynis recognised a firewall               |
 | `NONE`/`UNAVAILABLE` | `0`                     | `1`     | Both looked, neither found one            |
+| `NONE`               | Lynis absent            | `1`     | The tools looked on the device, found none |
+| `UNAVAILABLE`        | Lynis absent            | `2`     | Nothing looked                            |
 | absent               | `1`                     | `0`     | Lynis recognised a firewall               |
 | absent               | `0`                     | `2`     | Lynis misses `nixos-fw`; nothing else     |
 | absent               | Lynis absent            | `2`     | No evidence                               |

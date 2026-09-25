@@ -315,6 +315,24 @@ audit(){
  sl_user="${SUDO_USER:-$(id -un)}"
  sl_home=$(getent passwd "$sl_user" 2>/dev/null | cut -d: -f6)
  sl_home="${sl_home:-$HOME}"
+ # GNOME's settings are the user's too. Read as root, gsettings returns root's
+ # settings or the schema defaults, so it runs as the invoking user.
+ sl_settings_user=""
+ if [[ -n "$sl_user" && "$sl_user" != "$(id -un 2>/dev/null)" ]]; then
+   sl_settings_user="$sl_user"
+ fi
+ sl_gsettings() {
+   if [[ -n "$sl_settings_user" ]]; then
+     local uid bus=""
+     uid=$(id -u "$sl_settings_user" 2>/dev/null) || uid=""
+     if [[ -n "$uid" && -S "/run/user/$uid/bus" ]]; then
+       bus="unix:path=/run/user/$uid/bus"
+     fi
+     sudo -u "$sl_settings_user" env HOME="$sl_home" ${bus:+DBUS_SESSION_BUS_ADDRESS=$bus} gsettings "$@"
+   else
+     gsettings "$@"
+   fi
+ }
  if [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
    SL_ACTIVE_DE="$XDG_CURRENT_DESKTOP"
    SL_ACTIVE_DE_BASIS="XDG_CURRENT_DESKTOP"
@@ -349,14 +367,36 @@ audit(){
    echo ""
 
    echo "=== GNOME Settings (if available) ==="
-   if command -v gsettings >/dev/null 2>&1; then
-     # Check if GNOME settings are available
-     if gsettings list-schemas 2>/dev/null | grep -q "org.gnome.desktop.screensaver"; then
-       lock_enabled=$(gsettings get org.gnome.desktop.screensaver lock-enabled 2>/dev/null || echo "unknown")
-       idle_activation=$(gsettings get org.gnome.desktop.screensaver idle-activation-enabled 2>/dev/null || echo "unknown")
-       idle_delay=$(gsettings get org.gnome.desktop.session idle-delay 2>/dev/null || echo "unknown")
-       lock_delay=$(gsettings get org.gnome.desktop.screensaver lock-delay 2>/dev/null || echo "unknown")
-
+   if [[ -n "$sl_settings_user" ]]; then
+     echo "Settings read for user $sl_settings_user"
+   else
+     echo "Settings read as $(id -un 2>/dev/null || echo root) (no invoking user known)"
+   fi
+   gnome_schemas=""
+   gnome_readable=true
+   lock_enabled=""
+   if ! command -v gsettings >/dev/null 2>&1; then
+     echo "gsettings command not found"
+   elif ! gnome_schemas=$(sl_gsettings list-schemas 2>/dev/null); then
+     gnome_readable=false
+   fi
+   if [[ "$gnome_readable" == true && -n "$gnome_schemas" ]] \
+      && ! echo "$gnome_schemas" | grep -q "org.gnome.desktop.screensaver"; then
+     echo "GNOME screensaver settings not available"
+   elif [[ "$gnome_readable" == true && -n "$gnome_schemas" ]]; then
+       lock_enabled=$(sl_gsettings get org.gnome.desktop.screensaver lock-enabled 2>/dev/null || echo "unknown")
+       idle_activation=$(sl_gsettings get org.gnome.desktop.screensaver idle-activation-enabled 2>/dev/null || echo "unknown")
+       idle_delay=$(sl_gsettings get org.gnome.desktop.session idle-delay 2>/dev/null || echo "unknown")
+       lock_delay=$(sl_gsettings get org.gnome.desktop.screensaver lock-delay 2>/dev/null || echo "unknown")
+       # A read that failed is not a setting. Root's values are the defaults,
+       # so there is nothing to fall back to.
+       if [ "$lock_enabled" = "unknown" ] || [ "$idle_activation" = "unknown" ]; then
+         gnome_readable=false
+       fi
+   fi
+   if [[ "$gnome_readable" != true ]]; then
+     echo "GNOME settings could not be read for user ${sl_settings_user:-root}"
+   elif [[ -n "${lock_enabled:-}" ]]; then
        echo "Lock enabled: $lock_enabled"
        echo "Idle activation: $idle_activation"
        echo "Idle delay (seconds): $idle_delay"
@@ -391,11 +431,6 @@ audit(){
          echo "AUTO-LOCK-STATUS: DISABLED"
          SL_DE_STATUS_GNOME="DISABLED"
        fi
-     else
-       echo "GNOME screensaver settings not available"
-     fi
-   else
-     echo "gsettings command not found"
    fi
    echo ""
 
@@ -574,6 +609,11 @@ audit(){
    echo ""
    hb_screen_lock_summary
  } > "$output/screenlock-info.txt"
+
+ # The ruleset as the device has it. Evaluation reads this file and never
+ # probes the machine it happens to run on.
+ echo "Checking firewall ruleset..."
+ hb_collect_firewall_evidence > "$output/firewall-info.txt" 2>&1
 
  # Generate OS and Kernel status report (includes EOL checking)
  echo "Analyzing OS and kernel versions..."

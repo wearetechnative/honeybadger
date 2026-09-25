@@ -2172,24 +2172,33 @@ check_screen_lock_status() {
 # Check for active iptables firewall rules
 # Usage: check_iptables_firewall
 # Returns: 0 if active firewall detected, 1 otherwise
+# Sets HB_IPTABLES_DETAIL to "nixos-fw chain" when that is what was found.
 # Detects: NixOS nixos-fw chain + generic non-empty iptables rulesets
+#
+# Runs during the audit, as root. Evaluation never calls it: a probe at
+# check-output time would describe the analysing machine, not the audited one.
 check_iptables_firewall() {
+    HB_IPTABLES_DETAIL=""
+
     # Check if iptables command is available
     if ! command -v iptables >/dev/null 2>&1; then
         return 1
     fi
 
     # Check for NixOS nixos-fw chain (common on NixOS systems)
-    if sudo iptables -L nixos-fw -n >/dev/null 2>&1; then
-        local nixos_fw_rules=$(sudo iptables -L nixos-fw -n 2>/dev/null | grep -v "^Chain" | grep -v "^target" | wc -l)
+    if iptables -L nixos-fw -n >/dev/null 2>&1; then
+        local nixos_fw_rules
+        nixos_fw_rules=$(iptables -L nixos-fw -n 2>/dev/null | grep -v "^Chain" | grep -vc "^target")
         if [[ $nixos_fw_rules -gt 0 ]]; then
+            HB_IPTABLES_DETAIL="nixos-fw chain"
             return 0  # Active NixOS firewall detected
         fi
     fi
 
     # Check for generic iptables rules (non-default chains or rules)
     # Look for INPUT chain with actual rules (not just policy)
-    local input_rules=$(sudo iptables -L INPUT -n 2>/dev/null | grep -v "^Chain" | grep -v "^target" | wc -l)
+    local input_rules
+    input_rules=$(iptables -L INPUT -n 2>/dev/null | grep -v "^Chain" | grep -vc "^target")
     if [[ $input_rules -gt 0 ]]; then
         return 0  # Active iptables rules detected
     fi
@@ -2200,6 +2209,7 @@ check_iptables_firewall() {
 # Check for active nftables firewall rules
 # Usage: check_nftables_firewall
 # Returns: 0 if active firewall detected, 1 otherwise
+# Runs during the audit, as root - see check_iptables_firewall.
 check_nftables_firewall() {
     # Check if nft command is available
     if ! command -v nft >/dev/null 2>&1; then
@@ -2207,7 +2217,8 @@ check_nftables_firewall() {
     fi
 
     # Check for any nftables ruleset
-    local nft_rules=$(sudo nft list ruleset 2>/dev/null | grep -v "^$" | wc -l)
+    local nft_rules
+    nft_rules=$(nft list ruleset 2>/dev/null | grep -vc "^$")
     if [[ $nft_rules -gt 0 ]]; then
         return 0  # Active nftables rules detected
     fi
@@ -2215,59 +2226,107 @@ check_nftables_firewall() {
     return 1  # No active nftables detected
 }
 
-# Check firewall status from lynis-report.json with fallback detection
+# Write the firewall evidence for firewall-info.txt: the rulesets as the tools
+# report them, so a reader can check the conclusion, and a closing result line,
+# so evaluation does not have to re-derive it from a ruleset dump.
+#
+# FIREWALL-RULESET is one of:
+#   ACTIVE (<tool>[, <detail>])   an active ruleset was found
+#   NONE                          the tools were queried and found none
+#   UNAVAILABLE                   neither iptables nor nft is installed
+#
+# Usage: hb_collect_firewall_evidence > "$output/firewall-info.txt"
+hb_collect_firewall_evidence() {
+    local -a queried=()
+
+    echo "=== iptables ==="
+    if command -v iptables >/dev/null 2>&1; then
+        queried+=(iptables)
+        iptables -S 2>&1 || echo "(iptables -S failed)"
+    else
+        echo "iptables not installed"
+    fi
+    echo ""
+
+    echo "=== nftables ==="
+    if command -v nft >/dev/null 2>&1; then
+        queried+=(nft)
+        nft list ruleset 2>&1 || echo "(nft list ruleset failed)"
+    else
+        echo "nft not installed"
+    fi
+    echo ""
+
+    local result
+    if check_iptables_firewall; then
+        result="ACTIVE (iptables${HB_IPTABLES_DETAIL:+, $HB_IPTABLES_DETAIL})"
+    elif check_nftables_firewall; then
+        result="ACTIVE (nftables)"
+    elif (( ${#queried[@]} == 0 )); then
+        result="UNAVAILABLE"
+    else
+        result="NONE"
+    fi
+
+    echo "=== Result ==="
+    echo "FIREWALL-TOOLS-QUERIED: ${queried[*]:-none}"
+    echo "FIREWALL-RULESET: $result"
+}
+
+# Check firewall status from the evidence the audit collected
 # Usage: check_firewall_status <output_dir>
-# Prints: "Yes" | "Yes (iptables)" | "Yes (nftables)" | "No" | "Unknown - ..."
+# Prints: "Yes (<tool>)" | "Yes" | "No" | "Unknown - ..."
 # Exit code: 0 firewall active, 1 established absent, 2 could not be established
 #
-# Detection strategy:
-# 1. Primary: Check Lynis firewall_active field
-# 2. Fallback (if Lynis reports 0 or is unavailable): Direct iptables/nftables check
-#    - Detects NixOS nixos-fw chain
-#    - Detects custom iptables/nftables configurations
+# Evidence, in order: the ruleset recorded in firewall-info.txt, then Lynis
+# firewall_active. Nothing is probed here - see design.md of
+# collect-evidence-as-the-session-user for the table this implements.
 #
-# Absence is only established when Lynis looked and found nothing. Without a
-# Lynis report, a probe that finds nothing is not evidence of anything.
+# Lynis does not recognise the NixOS nixos-fw chain. So a Lynis "0" on its own,
+# in an archive collected before firewall-info.txt existed, is not evidence of
+# a missing firewall, and is reported as not established.
 check_firewall_status() {
     local output_dir="$1"
     local lynis_file="$output_dir/lynis-report.json"
-    local lynis_usable=false
+    local evidence_file="$output_dir/firewall-info.txt"
+    local ruleset="" lynis_active=""
 
+    if [[ -f "$evidence_file" ]]; then
+        ruleset=$(grep -m1 "^FIREWALL-RULESET:" "$evidence_file" | sed 's/^FIREWALL-RULESET: *//')
+    fi
     if [[ -f "$lynis_file" ]] && command -v jq >/dev/null 2>&1 \
         && jq -e . "$lynis_file" >/dev/null 2>&1; then
-        lynis_usable=true
+        lynis_active=$(jq -r '.firewall_active // "0"' "$lynis_file" 2>/dev/null)
     fi
 
-    # Primary detection: Lynis firewall_active field
-    if [[ "$lynis_usable" == true ]]; then
-        local firewall_active=$(jq -r '.firewall_active // "0"' "$lynis_file" 2>/dev/null)
-
-        if [[ "$firewall_active" == "1" ]]; then
-            echo "Yes"
-            return 0
-        fi
-    fi
-
-    # Fallback detection: Direct iptables/nftables check
-    # Only runs when Lynis reports no firewall (eliminates false negatives)
-    if check_iptables_firewall 2>/dev/null; then
-        echo "Yes (iptables)"
+    if [[ "$ruleset" == ACTIVE* ]]; then
+        echo "Yes ${ruleset#ACTIVE }"
         return 0
     fi
-
-    if check_nftables_firewall 2>/dev/null; then
-        echo "Yes (nftables)"
+    if [[ "$lynis_active" == "1" ]]; then
+        echo "Yes"
         return 0
     fi
-
-    if [[ "$lynis_usable" != true ]]; then
-        echo "Unknown - lynis-report.json not available and no active ruleset found"
+    # The tools looked on the device and found no ruleset.
+    if [[ "$ruleset" == "NONE" ]]; then
+        echo "No"
+        return 1
+    fi
+    if [[ -n "$ruleset" && "$lynis_active" == "0" ]]; then
+        echo "No"
+        return 1
+    fi
+    if [[ -n "$ruleset" ]]; then
+        echo "Unknown - no packet filter tool on the device and lynis-report.json not available"
+        return 2
+    fi
+    if [[ "$lynis_active" == "0" ]]; then
+        echo "Unknown - Lynis found no firewall, and no firewall-info.txt was collected to check it against"
         return 2
     fi
 
-    # No firewall detected by either method
-    echo "No"
-    return 1
+    echo "Unknown - neither firewall-info.txt nor lynis-report.json available"
+    return 2
 }
 
 # Detect if system is NixOS

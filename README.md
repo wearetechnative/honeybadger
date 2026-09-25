@@ -226,7 +226,8 @@ The audit generates the following reports in `output-<hostname>-<user>-<date>/`:
 - `hardware-serial.txt` - Device serial number, or `could-not-read` / `none-present`
 - `hardware-serial-source.txt` - Which source the serial came from
 - `nixos-system-info.txt` - NixOS-specific metadata (NixOS only)
-- `screenlock-info.txt` - Screen lock configuration details
+- `screenlock-info.txt` - Screen lock configuration details, including whose settings were read and which mechanism the verdict rests on
+- `firewall-info.txt` - The device's iptables and nftables rulesets, with a closing `FIREWALL-RULESET:` result line
 - `blockdevices.txt` - Disk encryption information
 - `installed-packages.txt` - Complete package listing
 

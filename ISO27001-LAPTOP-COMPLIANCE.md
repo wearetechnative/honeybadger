@@ -13,7 +13,7 @@
 |----------|------------|---------------|-----------|
 | **Disk encryptie** | 3.2 | `check_disk_encryption()` ← `blockdevices.txt` (LUKS) | ✅ Verplicht |
 | **Screen lock ≤15 min** | 3.2 | `check_screen_lock_status()` ← samenvattingsblok in `screenlock-info.txt` | ✅ Verplicht |
-| **Firewall actief** | 7.6 | `check_firewall_status()` ← `lynis-report.json` (`firewall_active`) | ✅ Verplicht |
+| **Firewall actief** | 7.6 | `check_firewall_status()` ← `firewall-info.txt`, dan `lynis-report.json` (`firewall_active`) | ✅ Verplicht |
 | **Lynis scan uitgevoerd** | 7.1 | `check_lynis_scan_exists()` ← `lynis-report.json` aanwezig | ✅ Verplicht |
 | **MFA remote access** | 3.2 | Handmatige verificatie | ⚠️ Verify |
 | **Geen kwetsbare software** | 8.1 | `check_vulnerable_packages()` ← package audit tool, telling en PKGS-7392 (❓ zonder audit tool) | ❌ Blocker |
@@ -41,6 +41,7 @@ output-{naam}-{datum}/
 ├── lynis-report.json         → Volledige Lynis data
 ├── lynis-report-warnings_fails.html → Warnings/suggestions
 ├── screenlock-info.txt       → Screen lock configuratie
+├── firewall-info.txt         → Firewall rulesets (iptables, nftables) tijdens de audit
 ├── installed-packages.txt    → Package inventory
 └── nix-supply-chain-audit.txt → NixOS supply chain security (NixOS only)
 

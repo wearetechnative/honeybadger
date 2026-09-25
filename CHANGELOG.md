@@ -2,7 +2,29 @@
 
 ## NEXT VERSION
 
+### Added
+
+- **Firewall evidence in the archive** - the audit writes `firewall-info.txt`
+  with the device's `iptables -S` and `nft list ruleset` output and a closing
+  `FIREWALL-RULESET:` line, so the firewall verdict can be checked and re-derived
+  from the archive alone.
+
 ### Changed
+
+- **The firewall verdict no longer probes the analysing machine** -
+  `check-output` used to run `sudo iptables` and `sudo nft` on whichever machine
+  analysed the scan, so an archive was judged by the analyst's firewall, and
+  analysing a colleague's tarball asked for the analyst's sudo password. The
+  verdict now comes from `firewall-info.txt`, then Lynis, and nothing else.
+  - **Two archived lobos scans move.** 14-07 and 25-08 go from "Niet
+    compliant" to "Gedeeltelijk compliant": Lynis reported no firewall, but
+    Lynis does not recognise the NixOS `nixos-fw` chain, and those archives
+    carry nothing else to decide it. The firewall is listed as not established.
+- **GNOME lock settings are the user's** - the audit read them with
+  `gsettings` as root, which returns root's settings or GNOME's defaults. They
+  are now read as the user who ran `sudo`, and `screenlock-info.txt` says whose
+  settings they are. A read that fails is recorded as such rather than
+  replaced by root's values.
 
 - **The xlsx asset row report is in English** - headings, instructions and
   every finding in `honeybadger-*-xlsx.md` are now English, like the asset

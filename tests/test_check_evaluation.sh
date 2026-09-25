@@ -91,8 +91,9 @@ test_lynis_backed_checks_are_indeterminate_without_lynis() {
     assert_equals 2 "$VERDICT" "vulnerable packages without lynis-report.json"
 
     echo '{"firewall_active": "0"}' > "$WORKDIR/none/lynis-report.json"
+    echo "FIREWALL-RULESET: NONE" > "$WORKDIR/none/firewall-info.txt"
     run_check check_firewall_status "$WORKDIR/none"
-    assert_equals 1 "$VERDICT" "Lynis looked and found no firewall: a failure"
+    assert_equals 1 "$VERDICT" "Lynis and the collected ruleset both found none: a failure"
 
     PATH="$saved_path"
     teardown
@@ -187,6 +188,114 @@ test_checklist_and_xlsx_agree_on_vulnerable_packages() {
     assert_contains "$XLSX" "Unknown - no package audit tool present" "xlsx column J, same words"
     assert_equals "null" "$(jq -r .findings.vulnerable_packages.count "$dir/asset-inventory.json")" \
         "nothing counted is not zero"
+    teardown
+}
+
+# ------------------------------------------------- firewall evidence
+
+# Usage: firewall_fixture <dir> <ruleset line or "-"> <lynis firewall_active or "-">
+firewall_fixture() {
+    mkdir -p "$1"
+    [[ "$2" != "-" ]] && printf '=== Result ===\nFIREWALL-RULESET: %s\n' "$2" > "$1/firewall-info.txt"
+    [[ "$3" != "-" ]] && echo "{\"firewall_active\": \"$3\"}" > "$1/lynis-report.json"
+    return 0
+}
+
+test_firewall_verdict_follows_the_evidence_table() {
+    setup
+    local -a rows=(
+        "ACTIVE (iptables, nixos-fw chain)|0|0|Yes (iptables, nixos-fw chain)"
+        "NONE|1|0|Yes"
+        "NONE|0|1|No"
+        "UNAVAILABLE|0|1|No"
+        "NONE|-|1|No"
+        "UNAVAILABLE|-|2|"
+        "-|1|0|Yes"
+        "-|0|2|"
+        "-|-|2|"
+    )
+    local row ruleset lynis expected detail n=0
+    for row in "${rows[@]}"; do
+        IFS='|' read -r ruleset lynis expected detail <<< "$row"
+        n=$((n + 1))
+        firewall_fixture "$WORKDIR/r$n" "$ruleset" "$lynis"
+        run_check check_firewall_status "$WORKDIR/r$n"
+        assert_equals "$expected" "$VERDICT" "evidence '$ruleset', Lynis '$lynis'"
+        [[ -n "$detail" ]] && assert_equals "$detail" "$DETAIL" "detail for '$ruleset'"
+    done
+    teardown
+}
+
+test_an_old_nixos_archive_is_not_failed_on_lynis_alone() {
+    setup
+    firewall_fixture "$WORKDIR/old" - 0
+    run_check check_firewall_status "$WORKDIR/old"
+    assert_equals 2 "$VERDICT" "Lynis misses nixos-fw"
+    assert_contains "$DETAIL" "no firewall-info.txt" "and the detail says what is missing"
+    teardown
+}
+
+test_evaluation_never_touches_the_analysing_machine() {
+    setup
+    local dir="$WORKDIR/output-host-user-01-01-2026" tool
+    compliant_fixture "$dir"
+    echo '{"hostname": "host", "hardening_index": "70", "firewall_active": "0",
+           "package_audit_tool_found": "1", "vulnerable_packages_found": "0"}' > "$dir/lynis-report.json"
+    for tool in sudo iptables nft; do
+        stub_tool "$WORKDIR/bin" "$tool" "echo $tool >> '$WORKDIR/invoked'; exit 1"
+    done
+    PATH="$WORKDIR/bin:$PATH" render_reports "$dir"
+
+    local invoked=""
+    [[ -e "$WORKDIR/invoked" ]] && invoked=$(tr '\n' ' ' < "$WORKDIR/invoked")
+    assert_equals "" "$invoked" "no firewall command and no sudo during check-output"
+    teardown
+}
+
+# Run hb_collect_firewall_evidence against stubbed tools.
+# Usage: collect_firewall <iptables stub body or "-"> <nft stub body or "-">
+collect_firewall() {
+    local bin="$WORKDIR/fwbin"
+    link_real_tools "$bin"
+    [[ "$1" != "-" ]] && stub_tool "$bin" iptables "$1"
+    [[ "$2" != "-" ]] && stub_tool "$bin" nft "$2"
+    FIREWALL_EVIDENCE=$(PATH="$bin" hb_collect_firewall_evidence)
+}
+
+test_collection_records_an_active_nixos_ruleset() {
+    setup
+    collect_firewall '
+case "$*" in
+  "-S") echo "-N nixos-fw"; echo "-A nixos-fw -p tcp --dport 22 -j nixos-fw-accept" ;;
+  "-L nixos-fw -n") printf "Chain nixos-fw
+target prot
+nixos-fw-accept tcp
+" ;;
+  *) exit 1 ;;
+esac' -
+    assert_contains "$FIREWALL_EVIDENCE" "-A nixos-fw -p tcp" "the raw ruleset is kept"
+    assert_contains "$FIREWALL_EVIDENCE" "FIREWALL-RULESET: ACTIVE (iptables, nixos-fw chain)" "result line"
+    teardown
+}
+
+test_collection_records_an_nftables_ruleset() {
+    setup
+    collect_firewall 'exit 1' 'echo "table inet filter {"; echo "}"'
+    assert_contains "$FIREWALL_EVIDENCE" "FIREWALL-RULESET: ACTIVE (nftables)" "result line"
+    teardown
+}
+
+test_collection_distinguishes_none_from_unavailable() {
+    setup
+    collect_firewall 'case "$*" in "-L INPUT -n") printf "Chain INPUT
+target prot
+" ;; *) exit 0 ;; esac' 'exit 0'
+    assert_contains "$FIREWALL_EVIDENCE" "FIREWALL-RULESET: NONE" "tools present, nothing found"
+    assert_contains "$FIREWALL_EVIDENCE" "FIREWALL-TOOLS-QUERIED: iptables nft" "and which were asked"
+    teardown
+    setup
+    collect_firewall - -
+    assert_contains "$FIREWALL_EVIDENCE" "FIREWALL-RULESET: UNAVAILABLE" "no tools at all"
     teardown
 }
 
@@ -430,6 +539,43 @@ test_an_indeterminate_control_is_na_in_the_xlsx() {
 
     assert_contains "$XLSX" "| G   | Disk Encryption                | N.A. " "not No"
     assert_contains "$XLSX" "- Disk Encryption: Unknown - blockdevices.txt not collected" "listed as unavailable"
+    teardown
+}
+
+
+test_gnome_settings_are_read_as_the_invoking_user() {
+    setup
+    stub_tool "$WORKDIR/bin" getent "echo 'alice:x:1000:100::$WORKDIR/alice:/bin/bash'"
+    stub_tool "$WORKDIR/bin" sudo "echo \"\$*\" >> '$WORKDIR/sudo.log'; shift 2; exec \"\$@\""
+    ln -sf "$(command -v env)" "$WORKDIR/bin/env"
+    COLLECT_SUDO_USER=alice collect_screen_lock 300
+
+    local log
+    log=$(cat "$WORKDIR/sudo.log" 2>/dev/null)
+    assert_contains "$log" "-u alice env HOME=$WORKDIR/alice gsettings get org.gnome.desktop.session idle-delay" \
+        "gsettings runs as alice, with her home"
+    assert_contains "$(cat "$WORKDIR/screenlock-info.txt")" "Settings read for user alice" "and the evidence says so"
+    teardown
+}
+
+test_gnome_settings_read_as_root_say_so() {
+    setup
+    collect_screen_lock 300
+    assert_contains "$(cat "$WORKDIR/screenlock-info.txt")" "(no invoking user known)" "read as root, stated"
+    teardown
+}
+
+test_a_failed_read_as_the_user_does_not_fall_back_to_root() {
+    setup
+    stub_tool "$WORKDIR/bin" getent "echo 'alice:x:1000:100::$WORKDIR/alice:/bin/bash'"
+    stub_tool "$WORKDIR/bin" sudo 'exit 1'
+    COLLECT_SUDO_USER=alice collect_screen_lock 300
+
+    local evidence
+    evidence=$(cat "$WORKDIR/screenlock-info.txt")
+    assert_contains "$evidence" "GNOME settings could not be read for user alice" "the failure is recorded"
+    [[ "$evidence" != *"Idle delay (seconds)"* ]]
+    assert_success "and root's values are not reported instead" $?
     teardown
 }
 
