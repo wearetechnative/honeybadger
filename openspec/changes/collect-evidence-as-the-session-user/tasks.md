@@ -30,7 +30,7 @@
       invoking user is known; verify both lines in the collection test
 - [x] 3.3 When the read as the user fails, report the GNOME settings as unavailable instead of
       falling back to root's values; verify with a `sudo` stub that fails
-- [ ] 3.4 Verify on the Debian/GNOME laptop in the fleet: set `idle-delay` to a non-default value
+- [x] 3.4 Verify on the Debian/GNOME laptop in the fleet: set `idle-delay` to a non-default value
       as the user, run `sudo ./RUNME.sh audit`, and confirm `screenlock-info.txt` reports that
       value; record the outcome under Open Questions in `design.md`
 

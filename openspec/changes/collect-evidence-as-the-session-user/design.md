@@ -125,7 +125,32 @@ long. It stays in the evidence file; the result line is what evaluation reads.
 No data migration. Old archives are evaluated through the table above. New audits carry
 `firewall-info.txt`.
 
-## Open Questions
+## Resolved Questions
 
-- Does `sudo -u <user> env HOME=... gsettings get` return the user's values on the Debian/GNOME
-  laptop in the fleet? To be verified by running the audit there with a non-default `idle-delay`.
+### gsettings under `sudo -u` reads the user's settings
+
+Verified on 2026-09-25 on a Linux Mint 22.3 test machine outside the fleet (the same dconf and
+GSettings stack as Debian and Ubuntu). With `idle-delay` set to 600 in the user's dconf database:
+
+| Read as                                     | `idle-delay`              |
+|---------------------------------------------|---------------------------|
+| root                                        | 300 (the schema default)  |
+| root, `sudo -u <user> env HOME=...`, no bus | 600                       |
+| the collection block under `sudo`           | 600, "Settings read for user <user>" |
+
+dconf reads the user's database without the session bus, so the approach holds. It also confirms
+the premise of this change: every GNOME scan so far reported the default, not the user's setting.
+
+The test was on Mint rather than on the Debian/GNOME laptop named in task 3.4, because that machine
+was not available to run the new code. Nobody was logged in graphically, so the summary block ranked
+the GNOME settings 4 and reported the timeout undetermined - the correct outcome for a machine with
+no active desktop.
+
+### Found along the way: Cinnamon is not read
+
+Mint's default desktop is Cinnamon, which keeps its lock settings under `org.cinnamon.desktop.*`,
+not `org.gnome.desktop.*`. The collection reads only the GNOME keys, and the active-desktop
+inference does not recognise the `cinnamon` process. A Mint laptop therefore resolves to GNOME
+settings at rank 4 and a `❓` screen lock, whatever its user configured. Supporting Cinnamon is a
+separate change: the same `sudo -u` read, the Cinnamon keys, and `cinnamon` / `X-Cinnamon` as an
+active desktop.
