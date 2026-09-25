@@ -1,6 +1,6 @@
 ## 1. Firewall Evidence At Collection
 
-- [ ] 1.1 Add a firewall collection step to the audit in `RUNME.sh` that writes `firewall-info.txt`
+- [x] 1.1 Add a firewall collection step to the audit in `RUNME.sh` that writes `firewall-info.txt`
       with the `iptables -S` output, the `nft list ruleset` output and a closing
       `FIREWALL-RULESET:` line (`ACTIVE (<tool>[, <detail>])`, `NONE` or `UNAVAILABLE`), reusing
       `check_iptables_firewall()` and `check_nftables_firewall()`; verify by running the step on
