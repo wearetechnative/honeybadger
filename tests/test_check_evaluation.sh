@@ -503,6 +503,30 @@ test_hardening_score_is_informational_and_states_its_threshold() {
     teardown
 }
 
+# ------------------------------------------------- inventory notes
+
+test_inventory_notes_only_explain_what_the_table_shows() {
+    setup
+    local dir="$WORKDIR/output-host-user-01-01-2026"
+    compliant_fixture "$dir"
+    printf '%s\n' "PF50L2MR" > "$dir/hardware-serial.txt"
+    echo "sysfs:product_serial" > "$dir/hardware-serial-source.txt"
+    render_reports "$dir"
+
+    [[ "$INVENTORY" != *"could-not-read"* && "$INVENTORY" != *"none-present"* ]]
+    assert_success "a serial that was read gets no serial note" $?
+    [[ "$INVENTORY" != *"suspicious software"* && "$INVENTORY" != *"Defender"* ]]
+    assert_success "no stale or Windows-only notes" $?
+    assert_contains "$INVENTORY" "Antivirus: see the 'Malware Scanner (AV product)' field" "the AV pointer stays"
+
+    printf '%s\n' "none-present" > "$dir/hardware-serial.txt"
+    render_reports "$dir"
+    assert_contains "$INVENTORY" "Serial Number 'none-present'" "the note appears when the value does"
+    [[ "$INVENTORY" != *"could-not-read"* ]]
+    assert_success "and only that one" $?
+    teardown
+}
+
 # ------------------------------------------------- the reports agree
 
 test_all_reports_agree_on_a_screen_lock_above_the_limit() {

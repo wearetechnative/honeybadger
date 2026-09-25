@@ -82,6 +82,12 @@
 
 ### Fixed
 
+- **Asset inventory notes read as problems with the scan** - the notes under
+  `asset-inventory.txt` explained `could-not-read` and `none-present` on every
+  scan, including those where the serial was read. They now appear only when
+  that value is in the table. A note about a "No suspicious software detected"
+  field that no longer exists is removed, and the antivirus pointer no longer
+  says "Defender" in a Linux report.
 - **Vulnerable packages always reported as none** - the checklist looked for
   PKGS-7392 with a query that fails on the object format current Lynis writes.
   The error was discarded and the check said `None` whatever the report held.
