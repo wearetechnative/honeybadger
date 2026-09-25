@@ -1563,15 +1563,17 @@ generate_asset_inventory() {
     echo "" >> "$report_file"
     echo "=====================================" >> "$report_file"
     echo "Notes:" >> "$report_file"
-    echo "  - Serial Number 'could-not-read': no source returned a value - a" >> "$report_file"
-    echo "    machine or packaging problem worth chasing" >> "$report_file"
-    echo "  - Serial Number 'none-present': the hardware reports no serial, as a" >> "$report_file"
-    echo "    virtual machine legitimately does - this asset needs a different" >> "$report_file"
-    echo "    key in the register rather than a repair" >> "$report_file"
-    echo "  - 'No suspicious software detected' requires manual review of:" >> "$report_file"
-    echo "    * installed-packages.txt" >> "$report_file"
-    echo "    * lynis-report.json security warnings" >> "$report_file"
-    echo "  - Defender (AV) status: See 'Malware Scanner (AV product)' field" >> "$report_file"
+    # A note explains a value in the table above, so it appears only when that
+    # value does. Printed unconditionally they read as problems with this scan.
+    if [[ "$HB_SERIAL_STATUS" == "$HB_SERIAL_NOT_READ" ]]; then
+        echo "  - Serial Number 'could-not-read': no source returned a value - a" >> "$report_file"
+        echo "    machine or packaging problem worth chasing" >> "$report_file"
+    elif [[ "$HB_SERIAL_STATUS" == "$HB_SERIAL_NOT_PRESENT" ]]; then
+        echo "  - Serial Number 'none-present': the hardware reports no serial, as a" >> "$report_file"
+        echo "    virtual machine legitimately does - this asset needs a different" >> "$report_file"
+        echo "    key in the register rather than a repair" >> "$report_file"
+    fi
+    echo "  - Antivirus: see the 'Malware Scanner (AV product)' field" >> "$report_file"
     echo "=====================================" >> "$report_file"
 
     cat "$report_file"
