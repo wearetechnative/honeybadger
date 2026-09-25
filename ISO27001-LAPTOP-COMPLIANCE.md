@@ -11,14 +11,22 @@
 
 | Vereiste | ISO Sectie | Check Methode | Pass/Fail |
 |----------|------------|---------------|-----------|
-| **Disk encryptie** | 3.2 | `blockdevices.txt` → LUKS/crypto | ✅ Verplicht |
-| **Screen lock** | 3.2 | `screenlock-info.txt` | ✅ Verplicht |
-| **Firewall actief** | 7.6 | Lynis/firewall status | ✅ Verplicht |
-| **Lynis scan uitgevoerd** | 7.1 | `lynis-report.json` aanwezig | ✅ Verplicht |
+| **Disk encryptie** | 3.2 | `check_disk_encryption()` ← `blockdevices.txt` (LUKS) | ✅ Verplicht |
+| **Screen lock ≤15 min** | 3.2 | `check_screen_lock_status()` ← samenvattingsblok in `screenlock-info.txt` | ✅ Verplicht |
+| **Firewall actief** | 7.6 | `check_firewall_status()` ← `lynis-report.json` (`firewall_active`) | ✅ Verplicht |
+| **Lynis scan uitgevoerd** | 7.1 | `check_lynis_scan_exists()` ← `lynis-report.json` aanwezig | ✅ Verplicht |
 | **MFA remote access** | 3.2 | Handmatige verificatie | ⚠️ Verify |
-| **Geen kwetsbare software** | 8.1 | Lynis PKGS-7392 warning | ❌ Blocker |
-| **Hardening score ≥75** | 7.1 | Lynis hardening index | ❌ Blocker |
-| **NixOS Supply Chain** (NixOS only) | 8.1 | `nix-supply-chain-audit.txt` → require-sigs | ✅ Verplicht |
+| **Geen kwetsbare software** | 8.1 | `check_vulnerable_packages()` ← package audit tool, telling en PKGS-7392 (❓ zonder audit tool) | ❌ Blocker |
+| **NixOS Supply Chain** (NixOS only) | 8.1 | `check_nixos_supply_chain()` ← `nix-supply-chain-audit.txt` (require-sigs) | ✅ Verplicht |
+| **Hardening score** | 7.1 | `check_hardening_score()` ← Lynis hardening index, drempel `MIN_HARDENING_SCORE` (standaard 65) | ℹ️ Informatief |
+
+Elke check geeft één van drie uitkomsten: ✅ aanwezig, ❌ de gegevens tonen dat het ontbreekt,
+❓ niet vast te stellen (het bewijsbestand ontbreekt). Alleen ❌ is een blocker. Een ❓ houdt het
+apparaat op "Gedeeltelijk compliant", omdat een control die niet is vastgesteld ook niet is
+aangetoond.
+
+De hardening score is een relatieve Lynis-index, geen ISO27001-control. Hij wordt met de toegepaste
+drempel getoond, maar laat een apparaat nooit zakken.
 
 ---
 
@@ -45,7 +53,7 @@ Generated compliance reports (via check-output command):
 
 - **Disk Encryption:** Moet "✅ Enabled" zijn
 - **Screen Lock:** Moet "✅ Enabled" zijn
-- **Lynis Hardening Score:** Moet ≥75/100 zijn
+- **Lynis Hardening Score:** Informatief, vergeleken met `MIN_HARDENING_SCORE` (standaard 65)
 - **Security Findings:** Critical/High = blockers
 
 ### Blockdevices.txt - Encryptie Check
@@ -73,7 +81,6 @@ ext4                       # Geen encryptie!
 ### Specifieke Issues
 
 - **PKGS-7392** (Vulnerable packages): CRITICAL → patch binnen 1 week
-- **Hardening score <75**: CRITICAL → verbeter binnen 1 week
 - **Geen encryptie**: BLOCKER → onmiddellijk fixen
 - **Geen screen lock**: HIGH → binnen 1 week fixen
 
@@ -95,13 +102,13 @@ ext4                       # Geen encryptie!
 
 | Vereiste (ISO27001) | Status | Bevinding |
 |---------------------|--------|-----------|
-| Disk encryptie | ✅/❌ | {LUKS type of "Niet actief"} |
-| Screen lock | ✅/❌ | {timeout of "Niet geconfigureerd"} |
-| Firewall | ✅/❌ | {Actief/Inactief} |
-| Lynis malware scan | ✅/❌ | {Uitgevoerd/Niet uitgevoerd} |
+| Disk encryptie | ✅/❌/❓ | {LUKS type of "Niet actief"} |
+| Screen lock | ✅/❌/❓ | {timeout en mechanisme, of waarom niet vast te stellen} |
+| Firewall | ✅/❌/❓ | {Actief/Inactief} |
+| Lynis scan uitgevoerd | ✅/❌/❓ | {Yes/No} |
 | MFA remote access | ⚠️ | Niet geverifieerd in scan |
-| Kwetsbare software | ✅/❌ | {PKGS-7392 status} |
-| Hardening score | ✅/❌ | {score}/100 |
+| Kwetsbare software | ✅/❌/❓ | {PKGS-7392 status} |
+| Hardening score | ℹ️ | {score}/100 (drempel >={MIN_HARDENING_SCORE}) |
 
 ---
 
@@ -152,16 +159,16 @@ compliance_status = {
     "firewall": check_firewall_active(),
     "lynis_scan": check_lynis_executed(),
     "vulnerable_pkgs": check_pkgs_7392_warning(),
-    "hardening_score": check_score >= 75
 }
+# Elke check: PASS, FAIL of UNDETERMINED. De hardening score telt niet mee.
 
 # Overall status
-if all(compliance_status.values()):
-    status = "✅ Compliant"
-elif any_critical_issues():
+if any_critical_check_failed():
     status = "❌ Niet compliant"
-else:
+elif screen_lock_failed() or any_check_undetermined():
     status = "⚠️ Gedeeltelijk compliant"
+else:
+    status = "✅ Compliant"
 ```
 
 ### Stap 3: Genereer Rapport
@@ -204,11 +211,10 @@ honeybadger-{user}-{date}-actions.md     → Lynis security acties
 - ✅ Firewall actief
 - ✅ Lynis uitgevoerd
 - ✅ Geen kwetsbare packages
-- ✅ Hardening score ≥75
+- ℹ️ Hardening score getoond met drempel, telt niet mee
 
 **Critical actions = binnen 1 week:**
 - Patch kwetsbare software
-- Fix hardening score <75
 - Enable ontbrekende encryptie
 - Enable ontbrekende screen lock
 

@@ -306,6 +306,33 @@ audit(){
 
  # Check for screen lock tools
  echo "Checking screen lock tools..."
+ # What each mechanism established, for the summary block written at the end.
+ # hb_screen_lock_summary documents every SL_* variable.
+ unset "${!SL_@}"
+ SL_RUNNING=""
+ # The audit runs as root, but the lock is configured by the user who ran it.
+ # Under sudo $HOME is root's home, where no hypridle or sway config lives.
+ sl_user="${SUDO_USER:-$(id -un)}"
+ sl_home=$(getent passwd "$sl_user" 2>/dev/null | cut -d: -f6)
+ sl_home="${sl_home:-$HOME}"
+ if [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
+   SL_ACTIVE_DE="$XDG_CURRENT_DESKTOP"
+   SL_ACTIVE_DE_BASIS="XDG_CURRENT_DESKTOP"
+ elif command -v pgrep >/dev/null 2>&1; then
+   # The audit runs under sudo, which clears XDG_CURRENT_DESKTOP. The session
+   # process that is running says the same thing, and is observed rather than
+   # stated.
+   for _de_proc in gnome-shell:GNOME plasmashell:KDE xfce4-session:XFCE Hyprland:Hyprland start-hyprland:Hyprland sway:sway; do
+     if pgrep -x "${_de_proc%%:*}" >/dev/null 2>&1; then
+       SL_ACTIVE_DE="${_de_proc#*:}"
+       SL_ACTIVE_DE_BASIS="${_de_proc%%:*} running"
+       break
+     fi
+   done
+ fi
+ # The SL_* variables set below are read by hb_screen_lock_summary through
+ # indirect expansion, which shellcheck cannot follow.
+ # shellcheck disable=SC2034
  {
    echo "=== Screen Lock Tools Detection ==="
    for tool in swaylock hyprlock gnome-screensaver xscreensaver i3lock slock light-locker xfce4-screensaver; do
@@ -347,11 +374,22 @@ audit(){
          echo "Total time until auto-lock: ${total_delay} seconds ($(($total_delay / 60)) minutes)"
        fi
 
-       # Check if auto-lock is properly configured
+       # Check if auto-lock is properly configured. GNOME is gated on its own
+       # timeout like every other mechanism; an idle delay of 0 means never.
        if [ "$lock_enabled" = "true" ] && [ "$idle_activation" = "true" ]; then
-         echo "AUTO-LOCK-STATUS: ENABLED"
+         if [ -n "${total_delay:-}" ] && [ "${idle_val:-0}" -eq 0 ]; then
+           echo "AUTO-LOCK-STATUS: DISABLED (idle delay 0: never)"
+           SL_DE_STATUS_GNOME="DISABLED"
+         elif [ -n "${total_delay:-}" ] && [ "$total_delay" -gt 900 ]; then
+           echo "AUTO-LOCK-STATUS: TIMEOUT-TOO-LONG (>${total_delay}s)"
+           SL_DE_STATUS_GNOME="ENABLED"; SL_DE_SECONDS_GNOME="$total_delay"
+         else
+           echo "AUTO-LOCK-STATUS: ENABLED"
+           SL_DE_STATUS_GNOME="ENABLED"; SL_DE_SECONDS_GNOME="${total_delay:-}"
+         fi
        else
          echo "AUTO-LOCK-STATUS: DISABLED"
+         SL_DE_STATUS_GNOME="DISABLED"
        fi
      else
        echo "GNOME screensaver settings not available"
@@ -362,29 +400,32 @@ audit(){
    echo ""
 
    echo "=== Hyprland/Sway Config Check ==="
+   echo "Config read for user $sl_user from $sl_home"
    # Check Hyprland
-   if [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
-     echo "Hyprland config found at $HOME/.config/hypr/hyprland.conf"
-     grep -i "lock\|swaylock\|hyprlock" "$HOME/.config/hypr/hyprland.conf" 2>/dev/null || echo "No lock configuration found"
+   if [ -f "$sl_home/.config/hypr/hyprland.conf" ]; then
+     echo "Hyprland config found at $sl_home/.config/hypr/hyprland.conf"
+     grep -i "lock\|swaylock\|hyprlock" "$sl_home/.config/hypr/hyprland.conf" 2>/dev/null || echo "No lock configuration found"
    fi
 
    # Check Sway
-   if [ -f "$HOME/.config/sway/config" ]; then
-     echo "Sway config found at $HOME/.config/sway/config"
-     grep -i "lock\|swaylock" "$HOME/.config/sway/config" 2>/dev/null || echo "No lock configuration found"
+   if [ -f "$sl_home/.config/sway/config" ]; then
+     echo "Sway config found at $sl_home/.config/sway/config"
+     grep -i "lock\|swaylock" "$sl_home/.config/sway/config" 2>/dev/null || echo "No lock configuration found"
    fi
 
    # Check hypridle config for auto-lock timeout
-   if [ -f "$HOME/.config/hypr/hypridle.conf" ]; then
+   if [ -f "$sl_home/.config/hypr/hypridle.conf" ]; then
      echo ""
-     echo "Hypridle config found at $HOME/.config/hypr/hypridle.conf"
+     echo "Hypridle config found at $sl_home/.config/hypr/hypridle.conf"
      # Look for timeout settings
-     timeout_line=$(grep -E "timeout.*=.*[0-9]+" "$HOME/.config/hypr/hypridle.conf" 2>/dev/null | head -1)
+     timeout_line=$(grep -E "timeout.*=.*[0-9]+" "$sl_home/.config/hypr/hypridle.conf" 2>/dev/null | head -1)
      if [ -n "$timeout_line" ]; then
        echo "$timeout_line"
        timeout_value=$(echo "$timeout_line" | grep -oP '\d+' | head -1)
        if [ -n "$timeout_value" ]; then
          echo "Auto-lock timeout: ${timeout_value} seconds ($(($timeout_value / 60)) minutes)"
+         SL_CONF_SECONDS_hypridle="$timeout_value"
+         SL_CONF_SOURCE_hypridle="$sl_home/.config/hypr/hypridle.conf"
          if [ "$timeout_value" -le 900 ]; then
            echo "AUTO-LOCK-STATUS: ENABLED (timeout ≤15 min)"
          else
@@ -398,15 +439,17 @@ audit(){
 
    # Check swayidle config
    if command -v swayidle >/dev/null 2>&1; then
-     if [ -f "$HOME/.config/sway/config" ]; then
+     if [ -f "$sl_home/.config/sway/config" ]; then
        echo ""
        echo "Checking swayidle configuration in Sway config..."
-       swayidle_config=$(grep -A2 "exec.*swayidle" "$HOME/.config/sway/config" 2>/dev/null)
+       swayidle_config=$(grep -A2 "exec.*swayidle" "$sl_home/.config/sway/config" 2>/dev/null)
        if [ -n "$swayidle_config" ]; then
          echo "$swayidle_config"
          timeout_val=$(echo "$swayidle_config" | grep -oP 'timeout \K\d+' | head -1)
          if [ -n "$timeout_val" ]; then
            echo "Auto-lock timeout: ${timeout_val} seconds ($(($timeout_val / 60)) minutes)"
+           SL_CONF_SECONDS_swayidle="$timeout_val"
+           SL_CONF_SOURCE_swayidle="$sl_home/.config/sway/config"
            if [ "$timeout_val" -le 900 ]; then
              echo "AUTO-LOCK-STATUS: ENABLED (timeout ≤15 min)"
            else
@@ -433,11 +476,26 @@ audit(){
      if [ -n "$running_procs" ]; then
        echo "$running_procs"
 
+       for _daemon in hypridle swayidle xautolock xss-lock gnome-screensaver; do
+         if echo "$running_procs" | grep -qE "(^[0-9]+ |/)${_daemon}( |$)"; then
+           SL_RUNNING="${SL_RUNNING:+$SL_RUNNING }$_daemon"
+         fi
+       done
+       # swayidle carries its timeout on its command line
+       _swayidle_args=$(echo "$running_procs" | grep -E "(^[0-9]+ |/)swayidle( |$)" | grep -oP 'timeout \K\d+' | head -1)
+       [ -n "$_swayidle_args" ] && SL_ARGS_SECONDS_swayidle="$_swayidle_args"
+       # gnome-screensaver reads its timeout from the GNOME settings above
+       if [ -n "${SL_DE_SECONDS_GNOME:-}" ]; then
+         SL_CONF_SECONDS_gnome_screensaver="$SL_DE_SECONDS_GNOME"
+         SL_CONF_SOURCE_gnome_screensaver="GNOME settings"
+       fi
+
        # Try to extract xautolock timeout if running
        if echo "$running_procs" | grep -q "xautolock"; then
          xautolock_time=$(echo "$running_procs" | grep "xautolock" | grep -oP '\-time \K\d+')
          if [ -n "$xautolock_time" ]; then
            echo "xautolock timeout: ${xautolock_time} minutes"
+           SL_ARGS_SECONDS_xautolock=$((xautolock_time * 60))
            if [ "$xautolock_time" -le 15 ]; then
              echo "AUTO-LOCK-STATUS: ENABLED (xautolock ≤15 min)"
            else
@@ -462,6 +520,7 @@ audit(){
        echo "XFCE Screensaver timeout: $idle_delay minutes"
 
        if [ "$lock_enabled" = "true" ] && [ "$idle_delay" != "unknown" ]; then
+         SL_DE_STATUS_XFCE="ENABLED"; SL_DE_SECONDS_XFCE=$((idle_delay * 60))
          if [ "$idle_delay" -le 15 ]; then
            echo "AUTO-LOCK-STATUS: ENABLED (XFCE ≤15 min)"
          else
@@ -469,6 +528,7 @@ audit(){
          fi
        else
          echo "AUTO-LOCK-STATUS: DISABLED"
+         SL_DE_STATUS_XFCE="DISABLED"
        fi
      fi
    else
@@ -488,21 +548,31 @@ audit(){
      if [ "$lock_enabled" != "unknown" ]; then
        echo "KDE Autolock enabled: $lock_enabled"
        if [ "$timeout" != "unknown" ]; then
-         timeout_min=$((timeout / 60))
-         echo "KDE lock timeout: ${timeout} seconds (${timeout_min} minutes)"
+         # kscreenlockerrc stores Timeout in minutes (the default is 5), not
+         # seconds. Read as seconds, every value passed the 900 limit.
+         timeout_min="$timeout"
+         echo "KDE lock timeout: ${timeout_min} minutes"
 
-         if [ "$lock_enabled" = "true" ] && [ "$timeout" -le 900 ]; then
+         if [ "$lock_enabled" = "true" ] && [ "$timeout_min" -le 15 ]; then
            echo "AUTO-LOCK-STATUS: ENABLED (KDE ≤15 min)"
+           SL_DE_STATUS_KDE="ENABLED"; SL_DE_SECONDS_KDE=$((timeout_min * 60))
          elif [ "$lock_enabled" = "true" ]; then
            echo "AUTO-LOCK-STATUS: TIMEOUT-TOO-LONG (${timeout_min} min)"
+           SL_DE_STATUS_KDE="ENABLED"; SL_DE_SECONDS_KDE=$((timeout_min * 60))
          else
            echo "AUTO-LOCK-STATUS: DISABLED"
+           SL_DE_STATUS_KDE="DISABLED"
          fi
        fi
      fi
    else
      echo "KDE settings not available"
    fi
+
+   # Which of the above the verdict rests on. Appended last, so a reader of an
+   # older file, and the fallback in check_screen_lock_status, are unaffected.
+   echo ""
+   hb_screen_lock_summary
  } > "$output/screenlock-info.txt"
 
  # Generate OS and Kernel status report (includes EOL checking)
@@ -692,6 +762,10 @@ check-output(){
  local input="$1"
  local output_dir=""
  local cleanup_extracted=false
+
+ # The reports apply configured thresholds (MIN_HARDENING_SCORE), so they read
+ # the same configuration the audit does.
+ load_server_config >/dev/null || exit 1
 
  # Helper function to extract tarball
  extract_tarball() {

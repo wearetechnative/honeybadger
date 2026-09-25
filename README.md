@@ -440,7 +440,7 @@ A value the audit could not determine, or deliberately declines to assert, is
 "vulnerable_packages": {
   "value": null,
   "count": null,
-  "finding": "not determined - no package audit tool present"
+  "finding": "Unknown - no package audit tool present (PKGS-7398)"
 }
 ```
 
@@ -457,7 +457,7 @@ validation says `None`, its Status formula counts `Yes` - so `value` stays
 "vulnerable_packages": {
   "value": null,
   "count": 1,
-  "finding": "1 vulnerable packages found"
+  "finding": "1 vulnerable packages found (apt-get)"
 }
 ```
 

@@ -40,6 +40,12 @@ DRY_RUN=false
 # When false, the Python script (lib/lynis_report_converter.py) is used (no Docker required)
 USE_DOCKER_CONVERTER=false
 
+# Lynis hardening score the reports compare against (default: 65)
+# Informational only: the score never fails a device. Because the norm is
+# configurable, every report that shows the score also states the threshold it
+# applied, so a reader never has to guess which value was in force.
+MIN_HARDENING_SCORE=65
+
 # Note: Configuration files are checked in this order:
 #   1. ./.honeybadger.conf (current directory)
 #   2. ~/.honeybadger.conf (user home directory)

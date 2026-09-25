@@ -4,14 +4,76 @@
 
 ### Changed
 
-- **The xlsx asset row report is in English** - `honeybadger-*-xlsx.md` was the
-  only report written in Dutch. Headings, instructions and every finding are
-  now English, like the compliance and actions reports.
+- **The xlsx asset row report is in English** - headings, instructions and
+  every finding in `honeybadger-*-xlsx.md` are now English, like the asset
+  inventory it sits beside. The compliance report remains Dutch.
   - The findings in `asset-inventory.json` come from the same text, on Linux,
     macOS and Windows, so they are English too (`not determined - ...`,
     `3 vulnerable packages found`). Values and keys are unchanged.
   - Column J's cell reads `see note` instead of `zie notitie`, and still
     serialises as `null`.
+- **One evaluation per control** - the compliance checklist, `asset-inventory.txt`
+  and the xlsx report used to derive some verdicts separately and could
+  contradict each other for the same scan. They now all call the same `check_*`
+  functions, and reformat the answer without deciding it again.
+  - **Some devices move from compliant to non-compliant on screen lock.** A
+    device with auto-lock enabled but a timeout above 15 minutes used to show
+    `Yes` in the asset inventory and the xlsx report while the checklist said
+    `❌`. All three now say no. This is the correction, not a regression.
+  - Column L (OS Up-to-date) comes from a new shared `check_os_uptodate()`.
+- **Vulnerable packages: nothing looked is not clean** - the checklist row
+  `Kwetsbare software` now uses the same determination as xlsx column J. A
+  machine without a package audit tool (Lynis PKGS-7398) is `❓`, not `✅ None`.
+  - **All NixOS scans move to `❓` here**, and a NixOS device that was otherwise
+    compliant becomes "Gedeeltelijk compliant", until a package audit the check
+    can read is collected.
+- **Three-state check results** - a check now says `❓` when the evidence it
+  needs was not collected, instead of `❌`. "Encryption is off" and "we could
+  not see whether encryption is on" are different findings.
+  - Only an observed failure is a blocker. A control that could not be
+    established keeps the device at "Gedeeltelijk compliant" and is listed under
+    `### Niet vastgesteld` in the compliance report.
+  - The xlsx report puts `N.A.` in such a cell, and lists it as unavailable.
+- **The screen lock verdict names its source** - the audit writes a closing
+  summary block to `screenlock-info.txt` recording which mechanism the verdict
+  rests on and why: a running lock daemon outranks the settings of a desktop
+  environment, and the active desktop outranks one whose settings are merely
+  installed. Where the timeout cannot be established the report says so,
+  rather than quoting GNOME's figure on a machine that does not run GNOME.
+  - Scans collected before this change are still evaluated, and say that their
+    source could not be established.
+  - GNOME settings are now checked against the 15-minute limit at collection,
+    like every other mechanism, and an idle delay of 0 counts as never.
+  - The rows are renamed so they no longer seem to contradict each other:
+    `Lynis scan uitgevoerd` in the checklist, `Malware Scanner (AV product)` in
+    the asset inventory.
+- **Configurable hardening threshold** - `MIN_HARDENING_SCORE` in
+  `.honeybadger.conf`, default 65. It was declared twice before, and could drift.
+  - The score is informational everywhere and never fails a device. The
+    `❌ NON-COMPLIANT` marker is gone from the asset inventory, and every report
+    that shows the score states the threshold it applied.
+  - `ISO27001-LAPTOP-COMPLIANCE.md` no longer calls a score below 75 a blocker.
+- **Windows reports state their limits** - the screen lock detail names the
+  900-second limit and the registry values it rests on, the report records that
+  a password on resume is required on Windows, and the antivirus detail states
+  the 7-day definition age limit.
+
+### Fixed
+
+- **Vulnerable packages always reported as none** - the checklist looked for
+  PKGS-7392 with a query that fails on the object format current Lynis writes.
+  The error was discarded and the check said `None` whatever the report held.
+  Both warning formats are now matched.
+- **Lock daemon config read from root's home** - the audit runs under `sudo`,
+  where `$HOME` is root's, so a `hypridle` or sway configuration in the user's
+  own `~/.config` was never found. It is now read from the home of the user who
+  ran `sudo`, and the evidence file says whose home that was.
+- **KDE screen lock timeout read as seconds** - `kscreenlockerrc` stores
+  `Timeout` in minutes, so every KDE timeout passed the 900-second limit. It is
+  now read as minutes.
+- **HardeningKitty finding still in Dutch** - the Windows hardening finding in
+  `asset-inventory.json` said `checks geslaagd`; it now reads `checks passed`,
+  and the Pester tests match the English wording of the earlier translation.
 
 ## 0.7.1 - The version command (September 2026)
 

@@ -273,12 +273,12 @@ Describe "New-HbHardeningScoreFinding" {
         $finding = New-HbHardeningScoreFinding -NotRun
         $finding["value"] | Should -BeNullOrEmpty
         $finding["tool"] | Should -Be "hardeningkitty"
-        $finding["finding"] | Should -Match "niet uitgevoerd"
+        $finding["finding"] | Should -Match "was not run"
     }
 
     It "treats zero checks as not run rather than as a perfect score" {
         (New-HbHardeningScoreFinding -TotalChecks 0 -PassedChecks 0)["finding"] |
-            Should -Match "niet uitgevoerd"
+            Should -Match "was not run"
     }
 }
 

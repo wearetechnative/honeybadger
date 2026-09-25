@@ -354,8 +354,8 @@ function New-HbHardeningScoreFinding {
         return New-HbFinding '' 'not determined - HardeningKitty was not run' 'tool' 'hardeningkitty'
     }
 
-    $finding = "HardeningKitty: $PassedChecks/$TotalChecks checks geslaagd " +
-               "($HighSeverity high, $MediumSeverity medium, $LowSeverity low) - geen 0-100 score"
+    $finding = "HardeningKitty: $PassedChecks/$TotalChecks checks passed " +
+               "($HighSeverity high, $MediumSeverity medium, $LowSeverity low) - no 0-100 score"
 
     return New-HbFinding '' $finding 'tool' 'hardeningkitty'
 }

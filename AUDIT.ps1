@@ -304,17 +304,25 @@ try {
 }
 
 # Task 4.6 & 4.7: Evaluate screen lock compliance
+# The same 900-second limit the Linux client applies. The detail names the limit
+# and the registry values the verdict rests on, so the finding can be traced
+# without reading this script.
+$script:screenLockLimitSeconds = 900
+$screenLockBasis = "limit $script:screenLockLimitSeconds s; " +
+    "ScreenSaveTimeOut=$(if($null -ne $script:screenSaveTimeOut){$script:screenSaveTimeOut}else{'not set'}), " +
+    "ScreenSaveActive=$(if($null -ne $script:screenSaveActive){$script:screenSaveActive}else{'not set'}), " +
+    "ScreenSaverIsSecure=$(if($null -ne $script:screenSaverSecure){$script:screenSaverSecure}else{'not set'})"
 if ($script:screenSaveTimeOut -and $script:screenSaveActive -eq "1" -and $script:screenSaverSecure -eq "1") {
-    if ([int]$script:screenSaveTimeOut -le 900) {
+    if ([int]$script:screenSaveTimeOut -le $script:screenLockLimitSeconds) {
         $script:screenLockCompliant = $true
-        $script:screenLockDetails = "✅ Screensaver configured correctly ($([int]$script:screenSaveTimeOut / 60) minutes)"
+        $script:screenLockDetails = "✅ Screensaver configured correctly ($([int]$script:screenSaveTimeOut / 60) minutes; $screenLockBasis)"
     } else {
         $script:screenLockCompliant = $false
-        $script:screenLockDetails = "❌ Screensaver timeout too long ($([int]$script:screenSaveTimeOut / 60) minutes, should be ≤15)"
+        $script:screenLockDetails = "❌ Screensaver timeout too long ($([int]$script:screenSaveTimeOut / 60) minutes, should be ≤15; $screenLockBasis)"
     }
 } else {
     $script:screenLockCompliant = $false
-    $script:screenLockDetails = "❌ Screensaver not properly configured (inactive, no password, or not set)"
+    $script:screenLockDetails = "❌ Screensaver not properly configured (inactive, no password, or not set; $screenLockBasis)"
 }
 
 # Task 5: Windows Firewall Collection
@@ -428,13 +436,14 @@ try {
         $script:defenderDaysOld = ((Get-Date) - $script:defenderSignatureDate).Days
     }
 
-    # Task 7.4 & 7.5: Determine compliance
-    if ($script:defenderEnabled -and $script:defenderDaysOld -lt 7) {
+    # Task 7.4 & 7.5: Determine compliance. Definitions must be under 7 days old.
+    $script:defenderMaxAgeDays = 7
+    if ($script:defenderEnabled -and $script:defenderDaysOld -lt $script:defenderMaxAgeDays) {
         $script:defenderCompliant = $true
-        $script:defenderDetails = "✅ Enabled, definitions updated $script:defenderDaysOld days ago (version $script:defenderSignatureVersion)"
-    } elseif ($script:defenderEnabled -and $script:defenderDaysOld -ge 7) {
+        $script:defenderDetails = "✅ Enabled, definitions updated $script:defenderDaysOld days ago (limit: under $script:defenderMaxAgeDays days; version $script:defenderSignatureVersion)"
+    } elseif ($script:defenderEnabled -and $script:defenderDaysOld -ge $script:defenderMaxAgeDays) {
         $script:defenderCompliant = $false
-        $script:defenderDetails = "❌ Enabled but definitions outdated ($script:defenderDaysOld days old)"
+        $script:defenderDetails = "❌ Enabled but definitions outdated ($script:defenderDaysOld days old, limit: under $script:defenderMaxAgeDays days)"
     } else {
         $script:defenderCompliant = $false
         $script:defenderDetails = "❌ Real-time protection disabled"
@@ -552,6 +561,10 @@ $complianceReport = @"
 - **Timeout**: $(if($script:screenSaveTimeOut){"$([int]$script:screenSaveTimeOut) seconds ($([Math]::Round([int]$script:screenSaveTimeOut / 60, 1)) minutes)"}else{"Not configured"})
 - **Active**: $(if($script:screenSaveActive -eq "1"){"Yes"}elseif($script:screenSaveActive -eq "0"){"No"}else{"Not configured"})
 - **Password Required**: $(if($script:screenSaverSecure -eq "1"){"Yes"}elseif($script:screenSaverSecure -eq "0"){"No"}else{"Not configured"})
+
+A passing verdict requires a timeout of at most 900 seconds (15 minutes), an active screensaver, and
+a password on resume (``ScreenSaverIsSecure = 1``). The password requirement is specific to this
+platform: Windows records it in the registry, where the Linux client has no equivalent setting to read.
 
 ### Power Management
 - **Display Timeout**: $(if($script:monitorTimeout){"$([Math]::Round($script:monitorTimeout / 60, 1)) minutes"}else{"Not configured"})

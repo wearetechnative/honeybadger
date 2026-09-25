@@ -1388,12 +1388,12 @@ generate_asset_inventory() {
     local kernel=""
     local model=""
     local serial=""
-    local disk_encrypted="Unknown"
-    local screen_lock="Unknown"
+    local disk_encrypted=""
+    local screen_lock=""
     local nix_installed="Unknown"
     local malware_scanner="Unknown"
     local firewall_active="Unknown"
-    local os_uptodate="Unknown"
+    local os_uptodate=""
     # Through the same resolver asset-inventory.json uses, so the two files
     # agree by construction rather than by comment.
     local owner
@@ -1403,9 +1403,8 @@ generate_asset_inventory() {
     local hardening_status=""
     local nixos_commit=""
     local nixos_generation=""
-
-    # Minimum hardening score threshold for compliance
-    local MIN_HARDENING_SCORE=65
+    local min_score
+    min_score=$(hb_min_hardening_score)
 
     # Get hostname and OS info from lynis-report.json
     if [[ -f "$output_dir/lynis-report.json" ]] && command -v jq >/dev/null 2>&1; then
@@ -1418,11 +1417,11 @@ generate_asset_inventory() {
         # Use check_firewall_status() for enhanced detection with fallback
         firewall_active=$(check_firewall_status "$output_dir")
 
-        # Extract hardening score
-        hardening_score=$(jq -r '.hardening_index // "Unknown"' "$output_dir/lynis-report.json" 2>/dev/null)
+        # The hardening score is context, not a verdict: shown with the
+        # threshold it was read against, and no pass or fail marker.
+        hardening_score=$(check_hardening_score "$output_dir")
 
-        # Format hardening score with status indicator and compliance check
-        if [[ "$hardening_score" != "Unknown" && "$hardening_score" =~ ^[0-9]+$ ]]; then
+        if [[ "$hardening_score" =~ ^[0-9]+$ ]]; then
             # Determine status indicator based on score
             if [[ $hardening_score -ge 80 ]]; then
                 hardening_status="Excellent"
@@ -1434,12 +1433,7 @@ generate_asset_inventory() {
                 hardening_status="Poor"
             fi
 
-            # Check compliance threshold
-            if [[ $hardening_score -ge $MIN_HARDENING_SCORE ]]; then
-                hardening_score="${hardening_score}/100 ($hardening_status) ✅ COMPLIANT (≥${MIN_HARDENING_SCORE})"
-            else
-                hardening_score="${hardening_score}/100 ($hardening_status) ❌ NON-COMPLIANT (required: ≥${MIN_HARDENING_SCORE})"
-            fi
+            hardening_score="${hardening_score}/100 ($hardening_status) - threshold >=${min_score}"
         else
             hardening_score="Unknown"
         fi
@@ -1470,26 +1464,10 @@ generate_asset_inventory() {
         fi
     fi
 
-    # Check for disk encryption from blockdevices.txt
-    if [[ -f "$output_dir/blockdevices.txt" ]]; then
-        if grep -q "crypto_LUKS" "$output_dir/blockdevices.txt"; then
-            disk_encrypted="Yes (LUKS)"
-        else
-            disk_encrypted="No"
-        fi
-    fi
-
-    # Check screen lock from screenlock-info.txt
-    if [[ -f "$output_dir/screenlock-info.txt" ]]; then
-        if grep -q "AUTO-LOCK-STATUS: ENABLED" "$output_dir/screenlock-info.txt"; then
-            screen_lock="Yes (Auto-lock enabled)"
-            # Extract the human-readable part (e.g., "10 minutes")
-            local lock_time=$(grep "Total time until auto-lock:" "$output_dir/screenlock-info.txt" | grep -oP '\([0-9]+ [a-z]+\)' | tr -d '()')
-            [[ -n "$lock_time" ]] && screen_lock="Yes (Auto-lock: $lock_time)"
-        else
-            screen_lock="Not detected / Disabled"
-        fi
-    fi
+    # Verdicts come from the shared checks, so this file cannot disagree with
+    # the compliance checklist that includes it.
+    disk_encrypted=$(check_disk_encryption "$output_dir")
+    screen_lock=$(check_screen_lock_status "$output_dir")
 
     # Check for Nix installation
     if [[ "$os_full" =~ "NixOS" ]]; then
@@ -1505,18 +1483,7 @@ generate_asset_inventory() {
         nix_installed="No"
     fi
 
-    # Check OS up-to-date status from os-kernel-status.txt
-    if [[ -f "$output_dir/os-kernel-status.txt" ]]; then
-        if grep -q "Result: ✓ PASS" "$output_dir/os-kernel-status.txt"; then
-            os_uptodate="Yes (Current)"
-        elif grep -q "Result: ⚠ WARNING" "$output_dir/os-kernel-status.txt"; then
-            os_uptodate="Supported (Upgrade recommended)"
-        elif grep -q "Result: ✗ FAIL" "$output_dir/os-kernel-status.txt"; then
-            os_uptodate="No (EOL)"
-        else
-            os_uptodate="Unknown"
-        fi
-    fi
+    os_uptodate=$(check_os_uptodate "$output_dir")
 
     # Get report date from directory name or file timestamp
     if [[ "$output_dir" =~ ([0-9]{2}-[0-9]{2}-[0-9]{4}) ]]; then
@@ -1568,7 +1535,7 @@ generate_asset_inventory() {
     printf "%-35s | %s\n" "Nix Installed" "$nix_installed" >> "$report_file"
     printf "%-35s | %s\n" "Disk Encryption" "$disk_encrypted" >> "$report_file"
     printf "%-35s | %s\n" "Screen Lock" "$screen_lock" >> "$report_file"
-    printf "%-35s | %s\n" "Malware Scanner" "$malware_scanner" >> "$report_file"
+    printf "%-35s | %s\n" "Malware Scanner (AV product)" "$malware_scanner" >> "$report_file"
     printf "%-35s | %s\n" "Firewall Active" "$firewall_active" >> "$report_file"
     printf "%-35s | %s\n" "OS Up-to-date" "$os_uptodate" >> "$report_file"
     printf "%-35s | %s\n" "Lynis Hardening Score" "$hardening_score" >> "$report_file"
@@ -1604,7 +1571,7 @@ generate_asset_inventory() {
     echo "  - 'No suspicious software detected' requires manual review of:" >> "$report_file"
     echo "    * installed-packages.txt" >> "$report_file"
     echo "    * lynis-report.json security warnings" >> "$report_file"
-    echo "  - Defender (AV) status: See 'Malware Scanner' field" >> "$report_file"
+    echo "  - Defender (AV) status: See 'Malware Scanner (AV product)' field" >> "$report_file"
     echo "=====================================" >> "$report_file"
 
     cat "$report_file"
@@ -1627,6 +1594,7 @@ HB_CONFIG_SETTINGS=(
     SERVER_RETRY_COUNT
     DRY_RUN
     USE_DOCKER_CONVERTER
+    MIN_HARDENING_SCORE
 )
 
 # Built-in defaults, used only where neither the environment nor a config file
@@ -1640,6 +1608,20 @@ HB_CONFIG_DEFAULT_SERVER_TIMEOUT="30"
 HB_CONFIG_DEFAULT_SERVER_RETRY_COUNT="3"
 HB_CONFIG_DEFAULT_DRY_RUN="false"
 HB_CONFIG_DEFAULT_USE_DOCKER_CONVERTER="false"
+HB_CONFIG_DEFAULT_MIN_HARDENING_SCORE="65"
+
+# The minimum Lynis hardening score, as configured. This is the one place the
+# number is declared; reports that show the score state it beside the score,
+# because once it is configurable a report no longer implies its own norm.
+# Usage: hb_min_hardening_score
+hb_min_hardening_score() {
+    local value="${MIN_HARDENING_SCORE:-$HB_CONFIG_DEFAULT_MIN_HARDENING_SCORE}"
+    if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+        echo "WARNING: MIN_HARDENING_SCORE '$value' is not a number, using $HB_CONFIG_DEFAULT_MIN_HARDENING_SCORE" >&2
+        value="$HB_CONFIG_DEFAULT_MIN_HARDENING_SCORE"
+    fi
+    echo "$value"
+}
 
 # Resolve the server settings.
 #
@@ -1933,16 +1915,32 @@ submit_tar_file() {
 # ISO27001 COMPLIANCE CHECK FUNCTIONS
 # ==============================================================================
 
+# ------------------------------------------------------------------------------
+# The check_* functions are the only place a compliance verdict is formed. Every
+# report calls them, and none of them reads an evidence file to decide pass or
+# fail for itself.
+#
+# Each prints a detail string for a human and returns its verdict:
+#   0  the control is in place
+#   1  the evidence shows it is not
+#   2  no sufficient evidence was collected to tell
+#
+# A caller may reformat the detail string. It may not re-derive the verdict
+# from it: the exit code is the verdict, and the detail is the reason.
+# "Encryption is off" and "we could not see whether encryption is on" are
+# different findings, and only the first is a blocker.
+# ------------------------------------------------------------------------------
+
 # Check disk encryption status from blockdevices.txt
 # Usage: check_disk_encryption <output_dir>
-# Returns: "Yes (LUKS)" | "Yes (LUKS2)" | "No" | "Unknown"
+# Prints: "Yes (LUKS)" | "Yes (LUKS2)" | "No" | "Unknown - ..."
 check_disk_encryption() {
     local output_dir="$1"
     local blockdevices_file="$output_dir/blockdevices.txt"
 
     if [[ ! -f "$blockdevices_file" ]]; then
-        echo "Unknown"
-        return 1
+        echo "Unknown - blockdevices.txt not collected"
+        return 2
     fi
 
     if grep -q "crypto_LUKS" "$blockdevices_file"; then
@@ -1959,18 +1957,192 @@ check_disk_encryption() {
     fi
 }
 
+# Screen lock limit, in seconds. ISO27001 policy: locked within 15 minutes.
+HB_SCREEN_LOCK_LIMIT_SECONDS=900
+
+# Choose the mechanism a screen lock verdict rests on, and write the closing
+# summary block of screenlock-info.txt.
+#
+# The evidence file can hold AUTO-LOCK-STATUS lines from half a dozen
+# mechanisms, and some of them answer for nobody: GNOME's schemas are installed
+# as a dependency on machines that never run GNOME, and gsettings reads them
+# happily. Only the device knows at scan time what was actually running, so the
+# choice is made here, at collection, and written down.
+#
+# Rank, most to least authoritative:
+#   1  a lock daemon that is running, timeout read from its own arguments
+#   2  a lock daemon that is running, timeout read from its configuration
+#   3  settings of the active desktop environment
+#   4  settings of a desktop environment that is not the active one
+#
+# A running daemon whose timeout cannot be read is still the mechanism: the
+# honest outcome is "enforced by X, timeout undetermined", not a figure lifted
+# from settings nothing is reading. Rank 4 is recorded but never trusted.
+#
+# Reads, all optional:
+#   SL_ACTIVE_DE          GNOME | KDE | XFCE | Hyprland | sway | ... (empty: unknown)
+#   SL_ACTIVE_DE_BASIS    how SL_ACTIVE_DE was established
+#   SL_RUNNING            space-separated running daemons, in the order found
+#   SL_ARGS_SECONDS_<d>   timeout from daemon <d>'s own arguments
+#   SL_CONF_SECONDS_<d>   timeout from daemon <d>'s configuration
+#   SL_CONF_SOURCE_<d>    where that configuration was read
+#   SL_DE_STATUS_<de>     ENABLED | DISABLED, for GNOME, KDE, XFCE
+#   SL_DE_SECONDS_<de>    that desktop's total time to lock
+# (daemon names with "-" use "_" in the variable name, e.g. xss_lock)
+#
+# Usage: hb_screen_lock_summary
+hb_screen_lock_summary() {
+    local limit="$HB_SCREEN_LOCK_LIMIT_SECONDS"
+    local mechanism="none" rank="none" rule="" basis="" seconds="" status="NONE"
+    local d var
+
+    _hb_sl_gate() {
+        if (( $1 <= limit )); then echo "ENABLED"; else echo "TIMEOUT-TOO-LONG"; fi
+    }
+
+    # Ranks 1 and 2: a running daemon. Prefer one whose timeout is known.
+    for d in ${SL_RUNNING:-}; do
+        var="SL_ARGS_SECONDS_${d//-/_}"
+        if [[ -n "${!var:-}" ]]; then
+            mechanism="$d"; rank=1; rule="daemon running, timeout from its arguments"
+            seconds="${!var}"; basis="$d is running with a timeout of ${seconds}s in its arguments"
+            break
+        fi
+    done
+    if [[ "$mechanism" == "none" ]]; then
+        for d in ${SL_RUNNING:-}; do
+            var="SL_CONF_SECONDS_${d//-/_}"
+            if [[ -n "${!var:-}" ]]; then
+                local src_var="SL_CONF_SOURCE_${d//-/_}"
+                mechanism="$d"; rank=2; rule="daemon running, timeout from its configuration"
+                seconds="${!var}"; basis="$d is running; ${seconds}s read from ${!src_var:-its configuration}"
+                break
+            fi
+        done
+    fi
+    if [[ "$mechanism" == "none" && -n "${SL_RUNNING:-}" ]]; then
+        d="${SL_RUNNING%% *}"
+        mechanism="$d"; rank=1; rule="daemon running"
+        basis="$d is running; no timeout found in its arguments or its configuration"
+        status="UNDETERMINED"
+    fi
+
+    # Rank 3: the active desktop's own settings.
+    local de de_status_var de_seconds_var
+    if [[ "$mechanism" == "none" && -n "${SL_ACTIVE_DE:-}" ]]; then
+        for de in GNOME KDE XFCE; do
+            [[ "${SL_ACTIVE_DE^^}" == *"$de"* ]] || continue
+            de_status_var="SL_DE_STATUS_$de"; de_seconds_var="SL_DE_SECONDS_$de"
+            [[ -n "${!de_status_var:-}" ]] || continue
+            mechanism="$de settings"; rank=3; rule="settings of the active desktop"
+            basis="$de is the active desktop (${SL_ACTIVE_DE_BASIS:-basis not recorded})"
+            if [[ "${!de_status_var}" == "DISABLED" ]]; then
+                status="DISABLED"
+            elif [[ -n "${!de_seconds_var:-}" ]]; then
+                seconds="${!de_seconds_var}"
+            else
+                status="UNDETERMINED"; basis+="; lock enabled but no timeout read"
+            fi
+            break
+        done
+    fi
+
+    # Rank 4: another desktop's settings. Recorded, never trusted.
+    if [[ "$mechanism" == "none" ]]; then
+        for de in GNOME KDE XFCE; do
+            de_status_var="SL_DE_STATUS_$de"; de_seconds_var="SL_DE_SECONDS_$de"
+            [[ -n "${!de_status_var:-}" ]] || continue
+            mechanism="$de settings"; rank=4; rule="settings of a desktop that is not active"
+            basis="$de settings are present, but $de is not the active desktop"
+            basis+=" (active: ${SL_ACTIVE_DE:-not established}); nothing shows they are enforced"
+            status="UNDETERMINED"
+            break
+        done
+    fi
+
+    if [[ -n "$seconds" && "$status" == "NONE" ]]; then
+        status=$(_hb_sl_gate "$seconds")
+    fi
+    [[ "$mechanism" == "none" ]] && basis="no running lock daemon and no desktop lock settings found"
+
+    echo "=== Authoritative Source Summary ==="
+    echo "SUMMARY-ACTIVE-DESKTOP: ${SL_ACTIVE_DE:-not established}${SL_ACTIVE_DE_BASIS:+ (${SL_ACTIVE_DE_BASIS})}"
+    echo "SUMMARY-MECHANISM: $mechanism"
+    echo "SUMMARY-RANK: $rank${rule:+ ($rule)}"
+    echo "SUMMARY-BASIS: $basis"
+    echo "SUMMARY-TIMEOUT-SECONDS: ${seconds:-undetermined}"
+    echo "SUMMARY-LIMIT-SECONDS: $limit"
+    echo "SUMMARY-STATUS: $status"
+}
+
+# Render a number of seconds as the unit a person would say.
+# Usage: _hb_duration <seconds>
+_hb_duration() {
+    local seconds="$1"
+    if (( seconds % 60 == 0 )); then
+        local minutes=$(( seconds / 60 ))
+        (( minutes == 1 )) && echo "1 minute" || echo "$minutes minutes"
+    else
+        echo "$seconds seconds"
+    fi
+}
+
 # Check screen lock status from screenlock-info.txt
 # Usage: check_screen_lock_status <output_dir>
-# Returns: "Yes (Auto-lock: X minutes)" | "Disabled" | "Timeout too long (X minutes)" | "Unknown"
+# Prints a detail string naming the mechanism the verdict rests on.
+# Exit code: 0 locked within the limit, 1 disabled or too slow, 2 not established
+#
+# The verdict comes from the summary block the collector writes last (see
+# hb_screen_lock_summary). A file collected before that block existed is still
+# evaluated the old way - first ENABLED anywhere, then the limit - and says that
+# its source could not be established.
 check_screen_lock_status() {
     local output_dir="$1"
     local screenlock_file="$output_dir/screenlock-info.txt"
+    local limit_minutes=$(( HB_SCREEN_LOCK_LIMIT_SECONDS / 60 ))
 
     if [[ ! -f "$screenlock_file" ]]; then
-        echo "Unknown"
-        return 1
+        echo "Unknown - screenlock-info.txt not collected"
+        return 2
     fi
 
+    if grep -q "^SUMMARY-STATUS:" "$screenlock_file"; then
+        local status mechanism rank seconds
+        status=$(grep -m1 "^SUMMARY-STATUS:" "$screenlock_file" | sed 's/^SUMMARY-STATUS: *//')
+        mechanism=$(grep -m1 "^SUMMARY-MECHANISM:" "$screenlock_file" | sed 's/^SUMMARY-MECHANISM: *//')
+        rank=$(grep -m1 "^SUMMARY-RANK:" "$screenlock_file" | sed 's/^SUMMARY-RANK: *//; s/ .*//')
+        seconds=$(grep -m1 "^SUMMARY-TIMEOUT-SECONDS:" "$screenlock_file" | sed 's/^SUMMARY-TIMEOUT-SECONDS: *//')
+
+        case "$status" in
+            ENABLED)
+                echo "Yes (Auto-lock: $(_hb_duration "$seconds"), $mechanism)"
+                return 0
+                ;;
+            TIMEOUT-TOO-LONG)
+                echo "Timeout too long ($(_hb_duration "$seconds"), $mechanism; limit $limit_minutes minutes)"
+                return 1
+                ;;
+            DISABLED)
+                echo "Disabled ($mechanism)"
+                return 1
+                ;;
+            UNDETERMINED)
+                if [[ "$rank" == "4" ]]; then
+                    echo "Unknown - only $mechanism found, and that desktop is not the active one"
+                else
+                    echo "Auto-lock enforced by $mechanism, timeout could not be established"
+                fi
+                return 2
+                ;;
+            *)
+                echo "Unknown - no auto-lock mechanism found"
+                return 2
+                ;;
+        esac
+    fi
+
+    # Collected before the summary block existed.
+    local unsourced="source not established"
     if grep -q "AUTO-LOCK-STATUS: ENABLED" "$screenlock_file"; then
         # Extract timeout in minutes
         local timeout_line=$(grep "Total time until auto-lock:" "$screenlock_file" | grep -oP '\([0-9]+ minutes\)' | tr -d '()')
@@ -1980,19 +2152,19 @@ check_screen_lock_status() {
 
         if [[ -n "$timeout_line" ]]; then
             local minutes=$(echo "$timeout_line" | grep -oP '[0-9]+')
-            if [[ $minutes -le 15 ]]; then
-                echo "Yes (Auto-lock: $timeout_line)"
+            if [[ $minutes -le $limit_minutes ]]; then
+                echo "Yes (Auto-lock: $timeout_line; $unsourced)"
                 return 0
             else
-                echo "Timeout too long ($timeout_line)"
+                echo "Timeout too long ($timeout_line; $unsourced; limit $limit_minutes minutes)"
                 return 1
             fi
         else
-            echo "Yes (Auto-lock enabled)"
+            echo "Yes (Auto-lock enabled; $unsourced)"
             return 0
         fi
     else
-        echo "Disabled"
+        echo "Disabled ($unsourced)"
         return 1
     fi
 }
@@ -2045,29 +2217,35 @@ check_nftables_firewall() {
 
 # Check firewall status from lynis-report.json with fallback detection
 # Usage: check_firewall_status <output_dir>
-# Returns: "Yes" | "No" | "Unknown"
-# Exit code: 0 if firewall active, 1 otherwise
+# Prints: "Yes" | "Yes (iptables)" | "Yes (nftables)" | "No" | "Unknown - ..."
+# Exit code: 0 firewall active, 1 established absent, 2 could not be established
 #
 # Detection strategy:
 # 1. Primary: Check Lynis firewall_active field
-# 2. Fallback (if Lynis reports 0): Direct iptables/nftables check
+# 2. Fallback (if Lynis reports 0 or is unavailable): Direct iptables/nftables check
 #    - Detects NixOS nixos-fw chain
 #    - Detects custom iptables/nftables configurations
+#
+# Absence is only established when Lynis looked and found nothing. Without a
+# Lynis report, a probe that finds nothing is not evidence of anything.
 check_firewall_status() {
     local output_dir="$1"
     local lynis_file="$output_dir/lynis-report.json"
+    local lynis_usable=false
 
-    if [[ ! -f "$lynis_file" ]] || ! command -v jq >/dev/null 2>&1; then
-        echo "Unknown"
-        return 1
+    if [[ -f "$lynis_file" ]] && command -v jq >/dev/null 2>&1 \
+        && jq -e . "$lynis_file" >/dev/null 2>&1; then
+        lynis_usable=true
     fi
 
     # Primary detection: Lynis firewall_active field
-    local firewall_active=$(jq -r '.firewall_active // "0"' "$lynis_file" 2>/dev/null)
+    if [[ "$lynis_usable" == true ]]; then
+        local firewall_active=$(jq -r '.firewall_active // "0"' "$lynis_file" 2>/dev/null)
 
-    if [[ "$firewall_active" == "1" ]]; then
-        echo "Yes"
-        return 0
+        if [[ "$firewall_active" == "1" ]]; then
+            echo "Yes"
+            return 0
+        fi
     fi
 
     # Fallback detection: Direct iptables/nftables check
@@ -2080,6 +2258,11 @@ check_firewall_status() {
     if check_nftables_firewall 2>/dev/null; then
         echo "Yes (nftables)"
         return 0
+    fi
+
+    if [[ "$lynis_usable" != true ]]; then
+        echo "Unknown - lynis-report.json not available and no active ruleset found"
+        return 2
     fi
 
     # No firewall detected by either method
@@ -2116,7 +2299,7 @@ is_nixos() {
 # Check NixOS supply chain security status
 # Usage: check_nixos_supply_chain <output_dir>
 # Returns: Status string (PASS/FAIL/Unknown)
-# Exit code: 0 if PASS, 1 if FAIL or Unknown
+# Exit code: 0 if PASS, 1 if FAIL, 2 if Unknown
 #
 # Also sets global variables for detailed reporting:
 #   NIXOS_SUPPLY_CHAIN_STATUS - PASS/FAIL/Unknown
@@ -2132,7 +2315,7 @@ check_nixos_supply_chain() {
         NIXOS_SUPPLY_CHAIN_ISSUES=()
         NIXOS_SUPPLY_CHAIN_STORE_OK="unknown"
         echo "Unknown"
-        return 1
+        return 2
     fi
 
     # Parse result from audit output
@@ -2190,7 +2373,7 @@ check_nixos_supply_chain() {
         NIXOS_SUPPLY_CHAIN_ISSUES=()
         NIXOS_SUPPLY_CHAIN_STORE_OK="unknown"
         echo "Unknown"
-        return 1
+        return 2
     fi
 }
 
@@ -2220,42 +2403,111 @@ check_hardening_score() {
 
 # Check for vulnerable packages from lynis-report.json
 # Usage: check_vulnerable_packages <output_dir>
-# Returns: "None" | "Yes" | "Unknown"
+# Prints: "None (<tool>)" | "<n> vulnerable packages found (<tool>)" |
+#         "Yes - Lynis warning PKGS-7392" | "Unknown - ..."
+#
+# Absence of a PKGS-7392 warning only means something when a package audit tool
+# looked. Without one Lynis raises PKGS-7398 and reports zero, and reading that
+# as "no vulnerable packages" would file a machine nobody checked as clean.
+#
+# Lynis has written warnings both as "ID|text|..." strings and as objects with
+# an "id"; both are matched.
 check_vulnerable_packages() {
     local output_dir="$1"
     local lynis_file="$output_dir/lynis-report.json"
 
-    if [[ ! -f "$lynis_file" ]] || ! command -v jq >/dev/null 2>&1; then
-        echo "Unknown"
+    if [[ ! -f "$lynis_file" ]]; then
+        echo "Unknown - lynis-report.json not collected"
+        return 2
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "Unknown - jq not available to read lynis-report.json"
+        return 2
+    fi
+    if ! jq -e . "$lynis_file" >/dev/null 2>&1; then
+        echo "Unknown - lynis-report.json is not readable"
+        return 2
+    fi
+
+    local audit_tool tool_name count has_pkgs_7392
+    audit_tool=$(jq -r '.package_audit_tool_found // "0"' "$lynis_file")
+    tool_name=$(jq -r '.package_audit_tool // "package audit tool"' "$lynis_file")
+    count=$(jq -r '.vulnerable_packages_found // "0"' "$lynis_file")
+    has_pkgs_7392=$(jq -r '[.["warning[]"][]?
+        | (if type == "object" then .id else (tostring | split("|")[0]) end)
+        | select(. == "PKGS-7392")] | length' "$lynis_file")
+
+    if [[ "$audit_tool" != "1" ]]; then
+        echo "Unknown - no package audit tool present (PKGS-7398)"
+        return 2
+    fi
+
+    if [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+        echo "$count vulnerable packages found ($tool_name)"
+        return 1
+    fi
+    if [[ "$has_pkgs_7392" != "0" ]]; then
+        echo "Yes - Lynis warning PKGS-7392"
         return 1
     fi
 
-    # Check if PKGS-7392 warning exists
-    local has_pkgs_7392=$(jq -r '.["warning[]"] | to_entries[] | select(.value | contains("PKGS-7392")) | .key' "$lynis_file" 2>/dev/null)
-
-    if [[ -n "$has_pkgs_7392" ]]; then
-        echo "Yes"
-        return 1
-    else
-        echo "None"
-        return 0
-    fi
+    echo "None ($tool_name)"
+    return 0
 }
 
-# Check if Lynis scan file exists
+# Check if a Lynis scan was run
 # Usage: check_lynis_scan_exists <output_dir>
-# Returns: "Yes" | "No"
+# Prints: "Yes" | "No" | "Unknown - ..."
+#
+# Here the absent file is itself the finding: the scan produces it, so no file
+# means no scan. A file that is there but cannot be read shows that a scan
+# started, not that it completed.
 check_lynis_scan_exists() {
     local output_dir="$1"
     local lynis_file="$output_dir/lynis-report.json"
 
-    if [[ -f "$lynis_file" ]]; then
-        echo "Yes"
-        return 0
-    else
+    if [[ ! -f "$lynis_file" ]]; then
         echo "No"
         return 1
     fi
+
+    if command -v jq >/dev/null 2>&1 && ! jq -e . "$lynis_file" >/dev/null 2>&1; then
+        echo "Unknown - lynis-report.json is present but not readable"
+        return 2
+    fi
+
+    echo "Yes"
+    return 0
+}
+
+# Check whether the OS release is still supported, from os-kernel-status.txt
+# Usage: check_os_uptodate <output_dir>
+# Prints: "Yes (Current)" | "Supported (Upgrade recommended)" | "No (EOL)" | "Unknown - ..."
+#
+# Three outcomes onto a pass or fail: supported but not the newest release
+# counts as up to date. Only end of life fails.
+check_os_uptodate() {
+    local output_dir="$1"
+    local status_file="$output_dir/os-kernel-status.txt"
+
+    if [[ ! -f "$status_file" ]]; then
+        echo "Unknown - os-kernel-status.txt not collected"
+        return 2
+    fi
+
+    if grep -q "Result: ✓ PASS" "$status_file"; then
+        echo "Yes (Current)"
+        return 0
+    elif grep -q "Result: ⚠ WARNING" "$status_file"; then
+        echo "Supported (Upgrade recommended)"
+        return 0
+    elif grep -q "Result: ✗ FAIL" "$status_file"; then
+        echo "No (EOL)"
+        return 1
+    fi
+
+    echo "Unknown - no recognisable result in os-kernel-status.txt"
+    return 2
 }
 
 # ==============================================================================
@@ -2395,6 +2647,8 @@ generate_compliance_report() {
 
     local hardening
     hardening=$(check_hardening_score "$output_dir")
+    local min_score
+    min_score=$(hb_min_hardening_score)
 
     local vulnerable_pkgs
     vulnerable_pkgs=$(check_vulnerable_packages "$output_dir")
@@ -2402,11 +2656,14 @@ generate_compliance_report() {
 
     local lynis_exists
     lynis_exists=$(check_lynis_scan_exists "$output_dir")
+    local lynis_exists_status=$?
 
     # Check NixOS supply chain security (if NixOS)
     local nixos_supply_chain=""
-    local nixos_supply_chain_status=1
+    local nixos_supply_chain_status=0
+    local on_nixos=false
     if is_nixos "$output_dir"; then
+        on_nixos=true
         nixos_supply_chain=$(check_nixos_supply_chain "$output_dir")
         nixos_supply_chain_status=$?
     fi
@@ -2426,24 +2683,42 @@ generate_compliance_report() {
     local compliance_status=""
     local critical_issues=()
 
-    # Critical checks
-    if [[ $disk_enc_status -ne 0 ]] || [[ "$disk_enc" == "No" ]]; then
+    # Critical checks. Only an observed failure (exit code 1) is a blocker: the
+    # tool cannot assert a failure it did not see. An indeterminate control
+    # (exit code 2) is listed separately, as a gap in the evidence.
+    local undetermined=()
+    if [[ $disk_enc_status -eq 1 ]]; then
         critical_issues+=("Geen disk encryptie")
+    elif [[ $disk_enc_status -eq 2 ]]; then
+        undetermined+=("Disk encryptie: $disk_enc")
     fi
-    if [[ $firewall_status -ne 0 ]] || [[ "$firewall" == "No" ]]; then
+    if [[ $firewall_status -eq 1 ]]; then
         critical_issues+=("Geen firewall")
+    elif [[ $firewall_status -eq 2 ]]; then
+        undetermined+=("Firewall: $firewall")
     fi
-    if [[ $vulnerable_status -ne 0 ]] || [[ "$vulnerable_pkgs" == "Yes" ]]; then
+    if [[ $vulnerable_status -eq 1 ]]; then
         critical_issues+=("Kwetsbare software")
+    elif [[ $vulnerable_status -eq 2 ]]; then
+        undetermined+=("Kwetsbare software: $vulnerable_pkgs")
     fi
-    if is_nixos "$output_dir" && [[ $nixos_supply_chain_status -ne 0 ]] || [[ "$nixos_supply_chain" == "FAIL" ]]; then
-        critical_issues+=("Insecure NixOS supply chain")
+    if [[ "$on_nixos" == true ]]; then
+        if [[ $nixos_supply_chain_status -eq 1 ]]; then
+            critical_issues+=("Insecure NixOS supply chain")
+        elif [[ $nixos_supply_chain_status -eq 2 ]]; then
+            undetermined+=("NixOS supply chain: niet vast te stellen uit nix-supply-chain-audit.txt")
+        fi
+    fi
+    if [[ $screen_lock_status -eq 2 ]]; then
+        undetermined+=("Screen lock: $screen_lock")
     fi
 
-    # Determine overall status
+    # Determine overall status. A control that could not be established is not
+    # a demonstrated control, so it holds the device at partial compliance with
+    # the gap named - the same place a failing screen lock puts it.
     if [[ ${#critical_issues[@]} -gt 0 ]]; then
         compliance_status="❌ Niet compliant"
-    elif [[ $screen_lock_status -ne 0 ]] || [[ "$screen_lock" == "Disabled" ]]; then
+    elif [[ $screen_lock_status -ne 0 ]] || [[ ${#undetermined[@]} -gt 0 ]]; then
         compliance_status="⚠️ Gedeeltelijk compliant"
     else
         compliance_status="✅ Compliant"
@@ -2470,10 +2745,10 @@ generate_compliance_report() {
     local disk_icon=$(status_icon $disk_enc_status)
     local screen_icon=$(status_icon $screen_lock_status)
     local firewall_icon=$(status_icon $firewall_status)
-    local lynis_icon=$(status_icon $([ "$lynis_exists" == "Yes" ] && echo 0 || echo 1))
+    local lynis_icon=$(status_icon $lynis_exists_status)
     local vuln_icon=$(status_icon $vulnerable_status)
     local nixos_supply_icon=""
-    if is_nixos "$output_dir"; then
+    if [[ "$on_nixos" == true ]]; then
         nixos_supply_icon=$(status_icon $nixos_supply_chain_status)
     fi
 
@@ -2495,10 +2770,10 @@ generate_compliance_report() {
 | Disk encryptie | $disk_icon | $disk_enc |
 | Screen lock | $screen_icon | $screen_lock |
 | Firewall | $firewall_icon | $firewall |
-| Lynis malware scan | $lynis_icon | $lynis_exists |
+| Lynis scan uitgevoerd | $lynis_icon | $lynis_exists |
 | MFA remote access | ⚠️ | Niet geverifieerd in scan |
 | Kwetsbare software | $vuln_icon | $vulnerable_pkgs |
-| Hardening score | ℹ️ | $hardening/100 |
+| Hardening score | ℹ️ | $hardening/100 (drempel >=$min_score) |
 EOF
 
     # Add NixOS supply chain row if system is NixOS
@@ -2576,6 +2851,19 @@ EOF
         echo "" >> "$report_file"
     fi
 
+    # Controls the scan could not establish
+    if [[ ${#undetermined[@]} -gt 0 ]]; then
+        echo "### Niet vastgesteld" >> "$report_file"
+        echo "" >> "$report_file"
+        echo "Deze controls konden uit de verzamelde gegevens niet worden vastgesteld." >> "$report_file"
+        echo "Ze tellen niet als blocker, maar ook niet als aangetoond." >> "$report_file"
+        echo "" >> "$report_file"
+        for issue in "${undetermined[@]}"; do
+            echo "- [ ] $issue" >> "$report_file"
+        done
+        echo "" >> "$report_file"
+    fi
+
     cat >> "$report_file" <<EOF
 ---
 
@@ -2596,13 +2884,16 @@ EOF
 
 # Helper function to generate status icons
 # Usage: status_icon <exit_code>
-# Returns: ✅ for 0, ❌ for non-zero
+# Returns: ✅ for 0, ❌ for 1, ❓ for 2
+#
+# A check returns nothing else. Anything that does is a broken check, and is
+# rendered as a failure rather than passed off as merely unknown.
 status_icon() {
-    if [[ $1 -eq 0 ]]; then
-        echo "✅"
-    else
-        echo "❌"
-    fi
+    case "$1" in
+        0) echo "✅" ;;
+        2) echo "❓" ;;
+        *) echo "❌" ;;
+    esac
 }
 
 # ==============================================================================
@@ -2790,9 +3081,16 @@ EOF
 # ISO27001 XLSX ASSET ROW REPORT GENERATION
 # ==============================================================================
 
-# Minimum Lynis hardening score considered compliant.
-# Note: generate_asset_inventory() carries its own local copy of this threshold.
-HB_MIN_HARDENING_SCORE=65
+# The cell value for a Yes/No column, from a shared check's verdict. The
+# detail string is shown beside it and is never inspected to choose the value.
+# Usage: _xlsx_verdict_cell <exit_code>
+_xlsx_verdict_cell() {
+    case "$1" in
+        0) echo "Yes" ;;
+        1) echo "No" ;;
+        *) echo "N.A." ;;
+    esac
+}
 
 # Render a markdown table whose borders line up, by padding every cell to the
 # width of the widest cell in its column.
@@ -3047,59 +3345,23 @@ generate_xlsx_asset_row_report() {
 
     [[ -z "$scan_user" ]] && scan_user="unknown"
 
-    # --- G: Disk Encryption -------------------------------------------------
-    local disk_cell="N.A."
-    local disk_src="blockdevices.txt not available"
+    # --- G, H, I: the shared checks -----------------------------------------
+    # Cell value from the verdict, provenance from the detail. A control the
+    # check could not establish is listed as unavailable, in the check's words.
+    local disk_src disk_verdict disk_cell
+    disk_src=$(check_disk_encryption "$output_dir"); disk_verdict=$?
+    disk_cell=$(_xlsx_verdict_cell "$disk_verdict")
+    (( disk_verdict == 2 )) && unavailable+=("Disk Encryption: $disk_src")
 
-    if [[ -f "$output_dir/blockdevices.txt" ]]; then
-        if grep -q "crypto_LUKS" "$output_dir/blockdevices.txt" 2>/dev/null; then
-            disk_cell="Yes"
-            disk_src="Yes (LUKS)"
-        else
-            disk_cell="No"
-            disk_src="no LUKS volume found"
-        fi
-    else
-        unavailable+=("blockdevices.txt - disk encryption")
-    fi
+    local lock_src lock_verdict lock_cell
+    lock_src=$(check_screen_lock_status "$output_dir"); lock_verdict=$?
+    lock_cell=$(_xlsx_verdict_cell "$lock_verdict")
+    (( lock_verdict == 2 )) && unavailable+=("Screen Lock: $lock_src")
 
-    # --- H: Screen Lock -----------------------------------------------------
-    local lock_cell="N.A."
-    local lock_src="screenlock-info.txt not available"
-
-    if [[ -f "$output_dir/screenlock-info.txt" ]]; then
-        if grep -q "AUTO-LOCK-STATUS: ENABLED" "$output_dir/screenlock-info.txt" 2>/dev/null; then
-            lock_cell="Yes"
-            local lock_time=$(grep "Total time until auto-lock:" "$output_dir/screenlock-info.txt" 2>/dev/null \
-                | grep -oP '\([0-9]+ [a-z]+\)' | tr -d '()')
-            if [[ -n "$lock_time" ]]; then
-                lock_src="Yes (auto-lock: $lock_time)"
-            else
-                lock_src="Yes (auto-lock enabled)"
-            fi
-        else
-            lock_cell="No"
-            lock_src="auto-lock not enabled"
-        fi
-    else
-        unavailable+=("screenlock-info.txt - screen lock")
-    fi
-
-    # --- I: Firewall Active -------------------------------------------------
-    local fw_cell="N.A."
-    local fw_src="firewall status could not be determined"
-    local fw_raw=$(check_firewall_status "$output_dir" 2>/dev/null)
-
-    case "$fw_raw" in
-        Yes*)
-            fw_cell="Yes"
-            fw_src="$fw_raw"
-            ;;
-        No)
-            fw_cell="No"
-            fw_src="no firewall detected"
-            ;;
-    esac
+    local fw_src fw_verdict fw_cell
+    fw_src=$(check_firewall_status "$output_dir" 2>/dev/null); fw_verdict=$?
+    fw_cell=$(_xlsx_verdict_cell "$fw_verdict")
+    (( fw_verdict == 2 )) && unavailable+=("Firewall Active: $fw_src")
 
     # --- J: Vulnerable Packages / Defender ----------------------------------
     # Deliberately no cell value: the register contradicts itself about which
@@ -3108,68 +3370,40 @@ generate_xlsx_asset_row_report() {
     # The count is a different question, and one the audit can answer. It
     # travels separately so that declining to fill in the cell does not throw
     # away a measurement. Empty means nothing was measured, not zero.
-    local vuln_finding="not determined - lynis-report.json not available"
-    local vuln_count_cell=""
-
-    if [[ "$have_lynis" == true ]]; then
-        local audit_tool=$(jq -r '.package_audit_tool_found // "0"' "$lynis_file" 2>/dev/null)
-        local vuln_count=$(jq -r '.vulnerable_packages_found // "0"' "$lynis_file" 2>/dev/null)
-
-        if [[ "$audit_tool" != "1" ]]; then
-            # A count of 0 here means "nothing looked", not "nothing found".
-            # This is the condition Lynis raises as PKGS-7398. Reporting it as
-            # zero would be the worse bug: a fleet that never looked, filed as
-            # clean.
-            vuln_finding="not determined - no package audit tool present"
-        elif [[ "$vuln_count" == "0" ]]; then
-            vuln_finding="no vulnerable packages found"
-            vuln_count_cell="0"
-        else
-            vuln_finding="$vuln_count vulnerable packages found"
-            vuln_count_cell="$vuln_count"
-        fi
+    local vuln_finding vuln_verdict vuln_count_cell=""
+    vuln_finding=$(check_vulnerable_packages "$output_dir"); vuln_verdict=$?
+    if (( vuln_verdict != 2 )); then
+        vuln_count_cell=$(jq -r '.vulnerable_packages_found // ""' "$lynis_file" 2>/dev/null)
     fi
 
     # --- K: Lynis Hardening Score -------------------------------------------
     local score_cell="N.A."
     local score_src="lynis-report.json not available"
+    local min_score
+    min_score=$(hb_min_hardening_score)
 
     if [[ "$have_lynis" == true ]]; then
-        local score=$(jq -r '.hardening_index // ""' "$lynis_file" 2>/dev/null)
+        local score
+        score=$(check_hardening_score "$output_dir")
         if [[ "$score" =~ ^[0-9]+$ ]]; then
             score_cell="$score"
-            if (( score >= HB_MIN_HARDENING_SCORE )); then
-                score_src="${score}/100 - threshold >=${HB_MIN_HARDENING_SCORE} met"
+            if (( score >= min_score )); then
+                score_src="${score}/100 - threshold >=${min_score} met"
             else
-                score_src="${score}/100 - threshold >=${HB_MIN_HARDENING_SCORE} not met"
+                score_src="${score}/100 - threshold >=${min_score} not met"
             fi
         else
-            score_src="hardening_index ontbreekt in lynis-report.json"
+            score_src="hardening_index missing from lynis-report.json"
         fi
     fi
 
     # --- L: OS Up-to-date ---------------------------------------------------
-    # Three outcomes onto two values: WARNING means supported but not newest,
-    # which this register counts as up-to-date. See design.md.
-    local uptodate_cell="N.A."
-    local uptodate_src="os-kernel-status.txt not available"
-
-    if [[ -f "$output_dir/os-kernel-status.txt" ]]; then
-        if grep -q "Result: ✓ PASS" "$output_dir/os-kernel-status.txt" 2>/dev/null; then
-            uptodate_cell="Yes"
-            uptodate_src="PASS - current release"
-        elif grep -q "Result: ⚠ WARNING" "$output_dir/os-kernel-status.txt" 2>/dev/null; then
-            uptodate_cell="Yes"
-            uptodate_src="WARNING - supported, upgrade recommended"
-        elif grep -q "Result: ✗ FAIL" "$output_dir/os-kernel-status.txt" 2>/dev/null; then
-            uptodate_cell="No"
-            uptodate_src="FAIL - end-of-life"
-        else
-            uptodate_src="no recognisable result in os-kernel-status.txt"
-        fi
-    else
-        unavailable+=("os-kernel-status.txt - OS up-to-date status")
-    fi
+    # Supported but not the newest release counts as up to date. See
+    # check_os_uptodate().
+    local uptodate_src uptodate_verdict uptodate_cell
+    uptodate_src=$(check_os_uptodate "$output_dir"); uptodate_verdict=$?
+    uptodate_cell=$(_xlsx_verdict_cell "$uptodate_verdict")
+    (( uptodate_verdict == 2 )) && unavailable+=("OS Up-to-date: $uptodate_src")
 
     # --- Report -------------------------------------------------------------
     {
