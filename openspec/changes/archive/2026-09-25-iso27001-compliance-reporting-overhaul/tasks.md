@@ -1,3 +1,10 @@
+> **Archived on 2026-09-25 without syncing its delta specs.** The capabilities it introduced
+> (`iso27001-compliance-reporting`, `compliance-action-reports`, `lynis-severity-classification`)
+> were already in `openspec/specs/`, and `iso27001-compliance-reporting` has since been rewritten by
+> `consolidate-compliance-check-evaluation` and `collect-evidence-as-the-session-user`. Syncing these
+> original `ADDED` requirements would reinstate what those changes replaced. The eight open tasks
+> are annotated below: three superseded, five deferred to bean `honeybadger-y51m`.
+
 ## 1. Library Functions - Compliance Checks
 
 - [x] 1.1 Add `check_disk_encryption()` function to parse blockdevices.txt for LUKS markers
@@ -6,7 +13,7 @@
 - [x] 1.4 Add `check_hardening_score()` function to read hardening_index from lynis-report.json and compare against threshold 75
 - [x] 1.5 Add `check_vulnerable_packages()` function to search lynis-report.json warnings for test ID PKGS-7392
 - [x] 1.6 Add `check_lynis_scan_exists()` function to verify lynis-report.json file exists
-- [ ] 1.7 Add `check_os_update_status()` function to parse os-update-history.txt for last update date and compliance status (✅ <14d, ⚠️ 14-30d, ❌ >30d)
+- [ ] 1.7 Add `check_os_update_status()` function to parse os-update-history.txt for last update date and compliance status (✅ <14d, ⚠️ 14-30d, ❌ >30d) — deferred to bean honeybadger-y51m
 - [x] 1.8 Add `check_iptables_firewall()` helper function to detect active iptables rules (check for non-empty chains, specifically nixos-fw for NixOS)
 - [x] 1.9 Add `check_nftables_firewall()` helper function to detect active nftables rules
 - [x] 1.10 Update `check_firewall_status()` to add fallback check when Lynis reports firewall_active=0 (call iptables/nftables helpers)
@@ -24,10 +31,10 @@
 
 - [x] 3.1 Add `generate_compliance_report()` main function
 - [x] 3.2 Implement compliance checklist table generation with ✅/❌/⚠️ status icons
-- [ ] 3.3 Add OS update status check to compliance checklist (call check_os_update_status() and include result)
+- [ ] 3.3 Add OS update status check to compliance checklist (call check_os_update_status() and include result) — deferred to bean honeybadger-y51m
 - [x] 3.4 Implement overall compliance status calculation (✅ Compliant / ⚠️ Gedeeltelijk / ❌ Niet compliant)
 - [x] 3.5 Add system information section integration (read os-kernel-status.txt and asset-inventory.txt)
-- [ ] 3.6 Include hardware serial number in system information section (read from hardware-serial.txt)
+- [ ] 3.6 Include hardware serial number in system information section (read from hardware-serial.txt) — superseded: the serial reaches compliance.md through the asset inventory it includes
 - [x] 3.7 Add actions summary section with counts by severity level
 - [x] 3.8 Implement deadline calculation (scan date + 1 week for critical issues)
 - [x] 3.9 Add ISO27001 policy reference footer (TN-ISO27-EN-PLCY-05.00 sections 3.2, 7.1, 8.1)
@@ -75,11 +82,11 @@
 - [x] 6.8 Test edge case: hardening score below 75 (should show CRITICAL failure)
 - [x] 6.9 Test edge case: vulnerable packages present (PKGS-7392 warning)
 - [x] 6.10 Test edge case: no firewall (should show CRITICAL failure)
-- [ ] 6.11 Test edge case: OS update status compliant (last update <14 days, should show ✅ COMPLIANT)
-- [ ] 6.12 Test edge case: OS update status warning (last update 14-30 days, should show ⚠️ WARNING)
-- [ ] 6.13 Test edge case: OS update status critical (last update >30 days, should show ❌ NON-COMPLIANT)
-- [ ] 6.14 Test serial number display in system info section (verify hardware-serial.txt content appears in compliance.md)
-- [ ] 6.15 Test serial number fallback when dmidecode unavailable (should show "Not available")
+- [ ] 6.11 Test edge case: OS update status compliant (last update <14 days, should show ✅ COMPLIANT) — deferred to bean honeybadger-y51m
+- [ ] 6.12 Test edge case: OS update status warning (last update 14-30 days, should show ⚠️ WARNING) — deferred to bean honeybadger-y51m
+- [ ] 6.13 Test edge case: OS update status critical (last update >30 days, should show ❌ NON-COMPLIANT) — deferred to bean honeybadger-y51m
+- [ ] 6.14 Test serial number display in system info section (verify hardware-serial.txt content appears in compliance.md) — superseded: covered by the hardware-serial tests
+- [ ] 6.15 Test serial number fallback when dmidecode unavailable (should show "Not available") — superseded: "Not available" was replaced by none-present / could-not-read in 0.7.0
 - [x] 6.16 Test severity classification with sample Lynis findings
 - [x] 6.17 Verify markdown formatting renders correctly
 - [x] 6.18 Verify compliance.md includes all sections (checklist, system info, actions summary, ISO27001 footer)
