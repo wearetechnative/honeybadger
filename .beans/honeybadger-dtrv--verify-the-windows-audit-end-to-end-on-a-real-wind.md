@@ -54,3 +54,44 @@ Both currently rest on a single reading:
 So report what the machines actually write in `hardware-serial.txt`, whether or
 not it matches. A submission landing as `serial_not_in_register` is a result
 here, not a failure of this task.
+
+## Results of the first run - 2026-09-28
+
+Run on a Windows 11 test laptop outside the fleet (Lenovo IdeaPad 3 15ITL6),
+with the client from `main` after the consolidation changes - the report
+carries the new wording ("limit 900 s", "limit: under 7 days", "checks passed
+... no 0-100 score"). The archive was submitted to the production badgersbay
+and downloaded back from it for inspection.
+
+Established:
+
+- fastfetch.json carries user, hostname, os (`Windows 11 x86_64`), host and
+  kernel.
+- hardware-serial.txt holds the BIOS serial, and hardware-serial-source.txt
+  names `wmi:Win32_BIOS`. Both files start with a UTF-8 BOM and end in CRLF;
+  that is bean honeybadger-qt9v. badgersbay reads the serial correctly
+  regardless.
+- asset-inventory.json is valid, schema_version 2, platform `windows`. Its
+  disk_encryption, screen_lock, firewall and os_uptodate findings agree with
+  the compliance checklist the client wrote.
+- The archive holds `output-<host>-<user>-<dd-MM-yyyy>/` with the reports,
+  the inventory, the serial files, bitlocker_result.txt and hardeningkitty.csv.
+- The submission arrived in badgersbay and landed unmatched, as expected: the
+  laptop is not in the register.
+
+The screen lock verdict was ❌ with ScreenSaveTimeOut and ScreenSaverIsSecure
+not set. That is correct for this laptop, which had not been configured yet.
+
+Still open:
+
+- Whether fastfetch installs through winget when absent. Not known whether it
+  was already installed on the test laptop.
+- A submission that resolves to an asset. That needs one of the three fleet
+  machines, which also settles the two register serials above.
+
+Found alongside: the check reads a password on wake only as a policy
+(`HKLM\...\PowerSettings`), not the per-user "require sign-in on wake"
+setting. A laptop that locks through sleep within 15 minutes, with no secure
+screensaver, is reported ❌. Linda's run of 2026-09-15 has that shape
+(screensaver without timeout or password, sleep after 10 minutes). The
+agreed remedy is configuring the screensaver, not changing the check.
