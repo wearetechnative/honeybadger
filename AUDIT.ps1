@@ -144,9 +144,11 @@ $script:serialSource = $serialResult.Source
 $script:serialStatus = $serialResult.Status
 
 try {
-    $serialResult.Value | Out-File "$reportDir\hardware-serial.txt" -Encoding UTF8
+    # Written like the Linux client writes them: no byte order mark, one LF.
+    # The Linux client reads these files too, in check-output.
+    Write-HbTextFile -Path "$reportDir\hardware-serial.txt" -Text $serialResult.Value
     if ($serialResult.IsUsable) {
-        $serialResult.Source | Out-File "$reportDir\hardware-serial-source.txt" -Encoding UTF8
+        Write-HbTextFile -Path "$reportDir\hardware-serial-source.txt" -Text $serialResult.Source
         Write-Host "    Found $($serialResult.Value) via $($serialResult.Source)" -ForegroundColor Gray
     } else {
         Write-Host "    No usable serial yet ($($serialResult.Status)) - details at the end of the run" -ForegroundColor Yellow

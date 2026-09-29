@@ -90,6 +90,16 @@
 
 ### Fixed
 
+- **A byte order mark in front of Windows serials** - the Windows client wrote
+  `hardware-serial.txt` and `hardware-serial-source.txt` with `Out-File
+  -Encoding UTF8`, which on Windows PowerShell 5.1 adds a byte order mark and
+  CRLF. badgersbay stripped both, but `check-output` kept the mark, and put it
+  in front of the serial in column D of the xlsx report - from where it would
+  be pasted into the register, and the row would stop matching the machine.
+  - The Windows client now writes both files without a mark and with one LF,
+    the way the Linux client writes them.
+  - `read_recorded_serial()` strips a mark, so archives already submitted read
+    cleanly too.
 - **Asset inventory notes read as problems with the scan** - the notes under
   `asset-inventory.txt` explained `could-not-read` and `none-present` on every
   scan, including those where the serial was read. They now appear only when

@@ -92,6 +92,35 @@ Describe "Test-HbUsableSerial" {
     }
 }
 
+Describe "Write-HbTextFile" {
+    # Out-File -Encoding UTF8 on Windows PowerShell 5.1 wrote a byte order mark
+    # and CRLF, which the Linux client kept in front of the serial.
+
+    It "writes UTF-8 without a byte order mark, ending in one LF" {
+        $path = Join-Path $TestDrive "hardware-serial.txt"
+        Write-HbTextFile -Path $path -Text "PF3NCBYR"
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        $bytes[0] | Should -Not -Be 0xEF
+        [System.Text.Encoding]::UTF8.GetString($bytes) | Should -BeExactly "PF3NCBYR`n"
+    }
+
+    It "does not add a second line ending to text that already has one" {
+        $path = Join-Path $TestDrive "source.txt"
+        Write-HbTextFile -Path $path -Text "wmi:Win32_BIOS`r`n"
+        [System.IO.File]::ReadAllText($path) | Should -BeExactly "wmi:Win32_BIOS`n"
+    }
+
+    It "resolves a relative path against the PowerShell location" {
+        Push-Location $TestDrive
+        try {
+            Write-HbTextFile -Path "relative.txt" -Text "x"
+            Test-Path (Join-Path $TestDrive "relative.txt") | Should -BeTrue
+        } finally {
+            Pop-Location
+        }
+    }
+}
+
 Describe "Resolve-HbSerial" {
     It "reports a usable serial with its source" {
         $result = Resolve-HbSerial "PF50L2MR"
