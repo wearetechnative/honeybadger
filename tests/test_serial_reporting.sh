@@ -32,6 +32,23 @@ teardown() {
 serial_file()  { cat "$OUT/hardware-serial.txt" 2>/dev/null; }
 source_file()  { cat "$OUT/hardware-serial-source.txt" 2>/dev/null; }
 
+# --- what gets read back --------------------------------------------------
+
+test_a_windows_serial_file_reads_as_the_bare_serial() {
+    # Windows PowerShell 5.1 wrote these with a byte order mark and CRLF. Archives
+    # submitted before the client stopped doing that must still read cleanly:
+    # the value goes into the xlsx report, and from there into the register.
+    setup
+    printf '\xef\xbb\xbfPF3NCBYR\r\n' > "$OUT/hardware-serial.txt"
+    printf '\xef\xbb\xbfwmi:Win32_BIOS\r\n' > "$OUT/hardware-serial-source.txt"
+
+    read_recorded_serial "$OUT"
+    assert_success "a BOM and CRLF around a real serial is a usable serial" $?
+    assert_equals "PF3NCBYR" "$HB_SERIAL_VALUE" "the value carries no BOM"
+    assert_equals "wmi:Win32_BIOS" "$HB_SERIAL_SOURCE" "nor does the source"
+    teardown
+}
+
 # --- what gets written -----------------------------------------------------
 
 test_a_usable_serial_is_written_with_its_source() {

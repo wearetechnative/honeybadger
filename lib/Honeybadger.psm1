@@ -598,7 +598,36 @@ function Get-HbSubmissionHeaders {
     }
 }
 
+# --- files -----------------------------------------------------------------
+
+<#
+.SYNOPSIS
+    Write text as UTF-8 without a byte order mark, ending in a single LF.
+
+.DESCRIPTION
+    Out-File -Encoding UTF8 on Windows PowerShell 5.1 writes a byte order mark
+    and CRLF. badgersbay strips both, but the Linux client reads these files in
+    check-output as well, and a mark it keeps ends up in front of the serial in
+    the asset register. This writes the file the way the Linux client does:
+    printf '%s\n'.
+
+    The path is resolved against the PowerShell location, not the process
+    directory .NET would use for a relative path.
+#>
+function Write-HbTextFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text
+    )
+
+    $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($fullPath, ($Text.TrimEnd("`r", "`n") + "`n"), $encoding)
+}
+
 Export-ModuleMember -Function @(
+    'Write-HbTextFile'
     'Get-HbSerialNotRead'
     'Get-HbSerialNotPresent'
     'Get-HbSerialPlaceholder'

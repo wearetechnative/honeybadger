@@ -1,11 +1,11 @@
 ---
 # honeybadger-qt9v
 title: Windows writes hardware-serial.txt with a BOM, and the Linux reader keeps it
-status: todo
+status: in-progress
 type: bug
 priority: high
 created_at: 2026-09-28T10:48:51Z
-updated_at: 2026-09-28T10:48:51Z
+updated_at: 2026-09-28T11:03:05Z
 ---
 
 Found on 2026-09-28 while verifying the Windows client (honeybadger-dtrv) on a
@@ -41,3 +41,24 @@ too. That is cosmetic, but it is the same cause.
    2026-09-15 - read correctly. `is_usable_serial()` should never see either.
 3. Tests: a Pester test that the written file has no BOM, and a shell test
    that a BOM + CRLF serial file reads as the bare serial with status ok.
+
+## Done - 2026-09-28
+
+- `Write-HbTextFile` in lib/Honeybadger.psm1 writes UTF-8 without a BOM,
+  ending in one LF, and resolves a relative path against the PowerShell
+  location. AUDIT.ps1 writes both serial files through it.
+- `_hb_serial_clean()` strips a leading BOM; it already removed CR and LF.
+  On the second test-laptop archive, `check-output`'s xlsx report now shows the
+  bare serial in column D.
+- Tests: `test_a_windows_serial_file_reads_as_the_bare_serial` in
+  tests/test_serial_reporting.sh (fails against the old reader), and three
+  Pester tests for `Write-HbTextFile`.
+
+Only the serial files changed. fastfetch.json, asset-inventory.json and the
+reports still carry a BOM; badgersbay reads archive members as bytes and jq
+accepts a BOM, so nothing misreads them. bitlocker_result.txt is formatted from
+objects by Out-File, and changing its writer would change its layout.
+
+Not yet run on Windows: the Pester tests need pwsh, and the writer needs one
+more audit on a Windows machine to confirm `hardware-serial.txt` starts with
+the serial and not `EF BB BF`.

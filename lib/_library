@@ -997,7 +997,12 @@ is_usable_serial() {
 # in place so is_usable_serial() can reject it.
 # Usage: _hb_serial_clean <value>
 _hb_serial_clean() {
-    printf '%s' "$1" | tr -d '\r\n'
+    local value
+    value=$(printf '%s' "$1" | tr -d '\r\n')
+    # Windows PowerShell 5.1 writes UTF-8 with a byte order mark. Left in, it
+    # rides along invisibly into the xlsx report's serial column and from there
+    # into the register, where the row stops matching the machine.
+    printf '%s' "${value#$'\xef\xbb\xbf'}"
 }
 
 # Extract IOPlatformSerialNumber from `ioreg -d2 -c IOPlatformExpertDevice`.
